@@ -1,14 +1,12 @@
-import ChatInterface from "@/components/ChatInterface";
+import RecipeAssistantApp from "@/components/RecipeAssistantApp";
 
 import styles from "./page.module.css";
 
 /*
  * Az alkalmazás kezdőoldala.
  *
- * Ez Server Component maradhat, mert maga az oldal
- * nem kezel böngészőoldali állapotot.
- *
- * Az interaktív működés a külön ChatInterface
+ * Az oldal Server Component maradhat.
+ * Az interaktív működés a RecipeAssistantApp
  * Client Componentben található.
  */
 export default function Home() {
@@ -26,10 +24,10 @@ export default function Home() {
             </h1>
 
             <p className={styles.subtitle}>
-              Kérdezz a feltöltött receptekről.
-              Az alkalmazás OpenAI embeddinget,
-              PostgreSQL pgvector keresést és
-              RAG-alapú válaszgenerálást használ.
+              Tölts fel receptdokumentumokat,
+              dolgozd fel őket embeddingekké,
+              majd kérdezz a receptadatbázis
+              tartalmáról.
             </p>
           </div>
 
@@ -43,7 +41,7 @@ export default function Home() {
           </div>
         </header>
 
-        <ChatInterface />
+        <RecipeAssistantApp />
 
         <footer className={styles.footer}>
           <p>
