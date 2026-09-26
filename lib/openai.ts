@@ -19,16 +19,23 @@ const DEFAULT_EMBEDDING_MODEL =
 export const EMBEDDING_DIMENSIONS = 1536;
 
 /*
- * Az OpenAI kliens csak az első API-híváskor jön létre.
+ * Az OpenAI kliens kezdetben nem létezik.
  *
- * Ez azért előnyös, mert az alkalmazás azon részei,
- * amelyek nem használnak OpenAI API-t, API-kulcs nélkül
- * is betölthetők.
+ * Csak az első valódi OpenAI API-híváskor hozzuk létre.
+ * Ez azt jelenti, hogy a projekt olyan részei is
+ * betölthetők, amelyek nem használnak OpenAI API-t.
  */
 let openAIClient: OpenAI | null = null;
 
 /*
  * Visszaadja a konfigurált embeddingmodell nevét.
+ *
+ * Elsőként megpróbálja beolvasni az értéket az
+ * OPENAI_EMBEDDING_MODEL környezeti változóból.
+ *
+ * Ha a környezeti változó nincs beállítva vagy üres,
+ * az alapértelmezett text-embedding-3-small
+ * modellt használja.
  */
 export function getEmbeddingModel(): string {
   return (
@@ -38,12 +45,16 @@ export function getEmbeddingModel(): string {
 }
 
 /*
- * Létrehozza vagy visszaadja a már létrehozott
- * OpenAI API-klienst.
+ * Létrehozza vagy visszaadja a már korábban
+ * létrehozott OpenAI API-klienst.
+ *
+ * A függvény nem exportált, ezért csak ebben
+ * a modulban használható.
  */
 function getOpenAIClient(): OpenAI {
   /*
-   * Ha a kliens már létezik, nem hozunk létre újat.
+   * Ha a kliens már létezik, nem hozunk létre
+   * új példányt.
    */
   if (openAIClient) {
     return openAIClient;
@@ -52,11 +63,14 @@ function getOpenAIClient(): OpenAI {
   /*
    * Az API-kulcsot kizárólag a szerveroldali
    * környezeti változóból olvassuk be.
+   *
+   * Az API-kulcs a helyi .env fájlban található.
    */
   const apiKey = process.env.OPENAI_API_KEY?.trim();
 
   /*
-   * Érthető hibaüzenetet adunk, ha hiányzik a kulcs.
+   * Érthető hibaüzenetet adunk, ha hiányzik
+   * az API-kulcs.
    */
   if (!apiKey) {
     throw new Error(
@@ -77,15 +91,26 @@ function getOpenAIClient(): OpenAI {
 /*
  * Egyetlen szöveg embeddingjének létrehozása.
  *
- * A függvény a szöveget elküldi az OpenAI embedding API-nak,
- * majd visszaadja az elkészült számtömböt.
+ * Ezt a függvényt például rövid tesztekhez vagy
+ * egyetlen felhasználói kérdés embeddingjének
+ * elkészítéséhez használhatjuk.
+ *
+ * Paraméter:
+ *
+ * inputText:
+ *   Az embeddinggé alakítandó szöveg.
+ *
+ * Visszatérési érték:
+ *
+ * Promise<number[]>:
+ *   Egy 1536 elemű lebegőpontos számtömb.
  */
 export async function createEmbedding(
   inputText: string
 ): Promise<number[]> {
   /*
-   * A fölösleges szóközöket eltávolítjuk
-   * a szöveg elejéről és végéről.
+   * A szöveg elejéről és végéről eltávolítjuk
+   * a fölösleges whitespace karaktereket.
    */
   const normalizedInput = inputText.trim();
 
@@ -98,14 +123,17 @@ export async function createEmbedding(
     );
   }
 
+  /*
+   * OpenAI kliens és modellnév lekérése.
+   */
   const client = getOpenAIClient();
   const model = getEmbeddingModel();
 
   /*
    * Embeddingkérés elküldése az OpenAI API-nak.
    *
-   * A float formátum lebegőpontos számtömböt ad vissza,
-   * amelyet a pgvector adatbázismezőben tárolhatunk.
+   * Az encoding_format: "float" miatt az API
+   * lebegőpontos számtömböt ad vissza.
    */
   const response = await client.embeddings.create({
     model,
@@ -114,11 +142,15 @@ export async function createEmbedding(
   });
 
   /*
-   * Egyetlen szöveget küldtünk, ezért az első eredmény
-   * tartalmazza a szükséges embeddingvektort.
+   * Egyetlen szöveget küldtünk, ezért az első
+   * válaszelem tartalmazza a szükséges embeddinget.
    */
   const embedding = response.data[0]?.embedding;
 
+  /*
+   * Hibát jelzünk, ha az API nem adott vissza
+   * embeddingvektort.
+   */
   if (!embedding) {
     throw new Error(
       "Az OpenAI API nem adott vissza embeddingvektort."
@@ -126,8 +158,8 @@ export async function createEmbedding(
   }
 
   /*
-   * Ellenőrizzük, hogy a kapott vektor mérete megfelel-e
-   * az adatbázis VECTOR(1536) mezőjének.
+   * Ellenőrizzük, hogy az embedding dimenziója
+   * megfelel-e a PostgreSQL VECTOR(1536) mezőjének.
    */
   if (embedding.length !== EMBEDDING_DIMENSIONS) {
     throw new Error(
@@ -136,4 +168,129 @@ export async function createEmbedding(
   }
 
   return embedding;
+}
+
+/*
+ * Több szöveg embeddingjének létrehozása
+ * egyetlen OpenAI API-kérésben.
+ *
+ * Ez gyorsabb és gazdaságosabb, mint minden chunkhoz
+ * külön API-kérést indítani.
+ *
+ * Paraméter:
+ *
+ * inputTexts:
+ *   A feldolgozandó chunkszövegek tömbje.
+ *
+ * Visszatérési érték:
+ *
+ * Promise<number[][]>:
+ *   Embeddingvektorok tömbje.
+ *
+ * A visszaadott embeddingek sorrendje megegyezik
+ * a bemeneti szövegek sorrendjével.
+ */
+export async function createEmbeddings(
+  inputTexts: string[]
+): Promise<number[][]> {
+  /*
+   * Üres bemeneti tömb esetén nincs feldolgozandó
+   * szöveg, ezért üres tömböt adunk vissza.
+   *
+   * Ilyenkor nem indítunk OpenAI API-hívást.
+   */
+  if (inputTexts.length === 0) {
+    return [];
+  }
+
+  /*
+   * Minden szöveg elejéről és végéről eltávolítjuk
+   * a fölösleges whitespace karaktereket.
+   */
+  const normalizedInputs = inputTexts.map(
+    (inputText) => inputText.trim()
+  );
+
+  /*
+   * Megkeressük, hogy van-e üres szöveg
+   * a bemeneti tömbben.
+   */
+  const emptyInputIndex = normalizedInputs.findIndex(
+    (inputText) => inputText.length === 0
+  );
+
+  /*
+   * Egyetlen üres chunkhoz sem készítünk embeddinget.
+   *
+   * A hibaüzenet tartalmazza a hibás elem indexét,
+   * így könnyebb megtalálni a problémás chunkot.
+   */
+  if (emptyInputIndex !== -1) {
+    throw new Error(
+      `A(z) ${emptyInputIndex}. indexű chunk üres, ezért nem generálható hozzá embedding.`
+    );
+  }
+
+  /*
+   * OpenAI kliens és modellnév lekérése.
+   */
+  const client = getOpenAIClient();
+  const model = getEmbeddingModel();
+
+  /*
+   * Az OpenAI embedding API egyszerre több szöveget
+   * is képes fogadni.
+   */
+  const response = await client.embeddings.create({
+    model,
+    input: normalizedInputs,
+    encoding_format: "float",
+  });
+
+  /*
+   * Az API válaszelemeit index szerint rendezzük.
+   *
+   * Ezzel biztosítjuk, hogy az embeddingek sorrendje
+   * pontosan megegyezzen a bemeneti chunkok sorrendjével.
+   */
+  const sortedEmbeddingData = [...response.data].sort(
+    (firstItem, secondItem) =>
+      firstItem.index - secondItem.index
+  );
+
+  /*
+   * A teljes válaszból csak az embeddingvektorokat
+   * tartjuk meg.
+   */
+  const embeddings = sortedEmbeddingData.map(
+    (embeddingData) => embeddingData.embedding
+  );
+
+  /*
+   * Ellenőrizzük, hogy minden bemeneti szöveghez
+   * pontosan egy embedding érkezett-e.
+   */
+  if (embeddings.length !== normalizedInputs.length) {
+    throw new Error(
+      `Nem megfelelő számú embedding érkezett. Várt: ${normalizedInputs.length}, kapott: ${embeddings.length}.`
+    );
+  }
+
+  /*
+   * Minden visszakapott embedding méretét
+   * külön ellenőrizzük.
+   */
+  embeddings.forEach(
+    (embedding, embeddingIndex) => {
+      if (
+        embedding.length !== EMBEDDING_DIMENSIONS
+      ) {
+        throw new Error(
+          `Nem megfelelő embeddingméret a(z) ${embeddingIndex}. indexnél. Várt: ${EMBEDDING_DIMENSIONS}, kapott: ${embedding.length}.`
+        );
+      }
+    }
+  );
+
+  return embeddings;
 }
