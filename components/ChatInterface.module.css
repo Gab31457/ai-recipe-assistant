@@ -38,6 +38,57 @@
   line-height: 1.5;
 }
 
+.headerControls {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 12px;
+}
+
+.promptSelectorGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.promptSelectorLabel {
+  color: #475569;
+  font-size: 0.74rem;
+  font-weight: 700;
+}
+
+.promptSelector {
+  min-width: 190px;
+  padding: 8px 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  outline: none;
+  background: #ffffff;
+  color: #334155;
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.promptSelector:hover:not(:disabled) {
+  border-color: #94a3b8;
+}
+
+.promptSelector:focus {
+  border-color: #2563eb;
+  box-shadow:
+    0 0 0 3px rgba(37, 99, 235, 0.12);
+}
+
+.promptSelector:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
 .statusBadge {
   flex-shrink: 0;
   padding: 7px 12px;
@@ -47,6 +98,7 @@
   color: #166534;
   font-size: 0.78rem;
   font-weight: 700;
+  white-space: nowrap;
 }
 
 .messageList {
@@ -129,6 +181,16 @@
   overflow-wrap: anywhere;
 }
 
+.promptUsed {
+  margin-top: 12px;
+  padding: 7px 9px;
+  border-radius: 7px;
+  background: #f1f5f9;
+  color: #64748b;
+  font-size: 0.72rem;
+  font-style: italic;
+}
+
 .sourceSection {
   margin-top: 16px;
   padding-top: 13px;
@@ -158,6 +220,11 @@
   gap: 14px;
   color: #526174;
   font-size: 0.82rem;
+}
+
+.sourceList li span:first-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .similarity {
@@ -238,6 +305,10 @@
     box-shadow 0.15s ease;
 }
 
+.chatInput::placeholder {
+  color: #94a3b8;
+}
+
 .chatInput:focus {
   border-color: #2563eb;
   box-shadow:
@@ -282,6 +353,11 @@
   transform: translateY(-1px);
 }
 
+.sendButton:focus-visible {
+  outline: 3px solid rgba(37, 99, 235, 0.3);
+  outline-offset: 2px;
+}
+
 .sendButton:disabled {
   cursor: not-allowed;
   background: #94a3b8;
@@ -302,6 +378,18 @@
   }
 }
 
+@media (max-width: 800px) {
+  .chatHeader {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .headerControls {
+    justify-content: space-between;
+    width: 100%;
+  }
+}
+
 @media (max-width: 700px) {
   .chatContainer {
     min-height: 600px;
@@ -309,8 +397,25 @@
   }
 
   .chatHeader {
-    flex-direction: column;
     padding: 18px;
+  }
+
+  .headerControls {
+    align-items: stretch;
+    flex-direction: column;
+    width: 100%;
+  }
+
+  .promptSelectorGroup {
+    width: 100%;
+  }
+
+  .promptSelector {
+    width: 100%;
+  }
+
+  .statusBadge {
+    align-self: flex-start;
   }
 
   .messageList {

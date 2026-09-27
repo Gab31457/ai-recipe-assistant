@@ -316,11 +316,23 @@ export function getSystemPromptVariant():
   return DEFAULT_SYSTEM_PROMPT_VARIANT;
 }
 
-// Visszaadja az aktív system prompt teljes szövegét.
-export function getSystemPrompt(): string {
-  const variant = getSystemPromptVariant();
+export function isSystemPromptVariant(
+  value: unknown
+): value is SystemPromptVariant {
+  return (
+    value === "strict" ||
+    value === "conversational"
+  );
+}
 
-  if (variant === "conversational") {
+export function getSystemPrompt(
+  requestedVariant?: SystemPromptVariant
+): string {
+  const activeVariant =
+    requestedVariant ??
+    getSystemPromptVariant();
+
+  if (activeVariant === "conversational") {
     return CONVERSATIONAL_SYSTEM_PROMPT;
   }
 

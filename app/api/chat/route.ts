@@ -1,8 +1,17 @@
 import { NextResponse } from "next/server";
 
 import {
+  isSystemPromptVariant,
+} from "@/lib/system-prompts";
+
+import type {
+  SystemPromptVariant,
+} from "@/lib/system-prompts";
+
+import {
   generateRagAnswer,
 } from "@/lib/rag";
+
 import {
   DEFAULT_VECTOR_SEARCH_OPTIONS,
   searchSimilarChunks,
@@ -24,6 +33,7 @@ interface ChatRequestBody {
   message?: unknown;
   limit?: unknown;
   minimumSimilarity?: unknown;
+  systemPromptVariant?: unknown;
 }
 
 /*
@@ -173,6 +183,47 @@ export async function POST(request: Request) {
       );
     }
 
+// A frontend által kiválasztott system prompt változat.
+//
+// Ha a frontend nem küld értéket, undefined marad,
+// és a RAG modul az alapértelmezett változatot használja.
+let systemPromptVariant:
+  | SystemPromptVariant
+  | undefined;
+
+// Ha a frontend küldött promptváltozatot,
+// ellenőrizzük, hogy támogatott értékről van-e szó.
+if (
+  requestBody.systemPromptVariant !==
+  undefined
+) {
+  if (
+    !isSystemPromptVariant(
+      requestBody.systemPromptVariant
+    )
+  ) {
+    return NextResponse.json(
+      {
+        success: false,
+        error: {
+          code:
+            "INVALID_SYSTEM_PROMPT_VARIANT",
+          message:
+            "A systemPromptVariant értéke csak strict vagy conversational lehet.",
+        },
+      },
+      {
+        status: 400,
+      }
+    );
+  }
+
+  // A típusellenőrzés után a TypeScript már tudja,
+  // hogy az érték SystemPromptVariant típusú.
+  systemPromptVariant =
+    requestBody.systemPromptVariant;
+}
+
     /*
      * 1. Retrieval lépés:
      *
@@ -197,6 +248,7 @@ export async function POST(request: Request) {
     const ragAnswer = await generateRagAnswer({
       question: normalizedMessage,
       searchResults,
+      systemPromptVariant,
     });
 
     /*
