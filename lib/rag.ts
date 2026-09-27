@@ -1,5 +1,10 @@
 import OpenAI from "openai";
 
+import {
+  getSystemPrompt,
+  getSystemPromptVariant,
+} from "@/lib/system-prompts";
+
 import type {
   VectorSearchResult,
 } from "@/lib/vector-search";
@@ -46,6 +51,9 @@ export interface RagAnswerResult {
    * A kontextusként felhasznált chunkok száma.
    */
   contextCount: number;
+  systemPromptVariant:
+  | "strict"
+  | "conversational";
 }
 
 /*
@@ -124,29 +132,7 @@ function buildContext(
  * - a hallucinációk csökkentésének szabályait;
  * - a válasz alapvető formátumát.
  */
-function buildSystemInstruction(): string {
-  return [
-    "Te egy magyar nyelvű AI receptasszisztens vagy.",
-    "",
-    "A válasz elkészítéséhez kizárólag a megadott receptforrásokat használd.",
-    "Ne találj ki olyan receptet, hozzávalót, mennyiséget vagy elkészítési lépést, amely nem szerepel a forrásokban.",
-    "",
-    "Ha a források nem tartalmaznak elegendő információt a kérdés megválaszolásához, ezt egyértelműen jelezd.",
-    "",
-    "Mindig magyarul válaszolj.",
-    "A válasz legyen világos, tömör és gyakorlatias.",
-    "",
-    "Ha receptet ajánlasz, lehetőség szerint add meg:",
-    "- a recept nevét;",
-    "- a releváns hozzávalókat;",
-    "- az elkészítés rövid lépéseit;",
-    "- a felhasznált forrás fájlnevét.",
-    "",
-    "Ne hivatkozz belső embeddingekre, vektorokra, chunkokra vagy adatbázis-technológiára.",
-    "",
-    "A forrásokat a válasz végén külön 'Források' részben sorold fel.",
-  ].join("\n");
-}
+
 
 /*
  * A felhasználói prompt létrehozása.
@@ -197,6 +183,8 @@ export async function generateRagAnswer(
         "A receptadatbázisban nem találtam a kérdéshez kellően releváns receptet vagy receptrészletet.",
       model: getChatModel(),
       contextCount: 0,
+      systemPromptVariant:
+        getSystemPromptVariant(),
     };
   }
 
@@ -226,7 +214,7 @@ export async function generateRagAnswer(
    */
   const response = await client.responses.create({
     model,
-    instructions: buildSystemInstruction(),
+    instructions: getSystemPrompt(),
     input: buildUserPrompt(
       normalizedQuestion,
       context
@@ -252,5 +240,7 @@ export async function generateRagAnswer(
     answer,
     model,
     contextCount: input.searchResults.length,
+    systemPromptVariant:
+      getSystemPromptVariant(),
   };
 }

@@ -69,6 +69,9 @@ interface SuccessfulChatResponse {
   message: string;
   answer: string;
   model: string;
+  systemPromptVariant:
+    | "strict"
+    | "conversational";
   retrieval: {
     resultCount: number;
     contextCount: number;

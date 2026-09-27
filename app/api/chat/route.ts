@@ -228,6 +228,8 @@ export async function POST(request: Request) {
         message: normalizedMessage,
         answer: ragAnswer.answer,
         model: ragAnswer.model,
+        systemPromptVariant:
+          ragAnswer.systemPromptVariant,
         retrieval: {
           resultCount: searchResults.length,
           contextCount:
