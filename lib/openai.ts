@@ -51,7 +51,7 @@ export function getEmbeddingModel(): string {
  * A függvény nem exportált, ezért csak ebben
  * a modulban használható.
  */
-function getOpenAIClient(): OpenAI {
+export function getOpenAIClient(): OpenAI {
   /*
    * Ha a kliens már létezik, nem hozunk létre
    * új példányt.
