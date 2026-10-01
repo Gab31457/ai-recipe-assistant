@@ -3,17 +3,14 @@
 import { useState } from "react";
 import styles from "./EvaluationDashboard.module.css";
 
-// Az elérhető teszttípusok.
 type EvaluationType =
   | "single-turn"
   | "ab-test"
   | "multi-turn"
   | "rag";
 
-// A receptasszisztens rendszerprompt-változatai.
 type PromptVariant = "strict" | "conversational";
 
-// Egy RAG-forrás adatai.
 interface Source {
   documentId: number;
   chunkId: number;
@@ -23,7 +20,6 @@ interface Source {
   similarity: number;
 }
 
-// A chat API sikeres válasza.
 interface ChatSuccess {
   success: true;
   answer: string;
@@ -36,7 +32,6 @@ interface ChatSuccess {
   sources: Source[];
 }
 
-// A chat vagy Judge API hibaválasza.
 interface ApiError {
   success: false;
   message?: string;
@@ -45,25 +40,24 @@ interface ApiError {
   };
 }
 
-// Az LLM Judge értékelése.
 interface JudgeResult {
   relevance: number;
   instructionFollowing: number;
   groundedness: number;
   clarity: number;
+  contextRetention: number;
+  consistency: number;
   overallScore: number;
   passed: boolean;
   explanation: string;
 }
 
-// A Judge API sikeres válasza.
 interface JudgeSuccess {
   success: true;
   model: string;
   result: JudgeResult;
 }
 
-// Egy teljes tesztváltozat eredménye.
 interface EvaluationResult {
   answer: string;
   answerModel: string;
@@ -76,14 +70,23 @@ interface EvaluationResult {
   judge: JudgeResult;
 }
 
-// A mentési API válasza.
+interface ConversationTurn {
+  user: string;
+  assistant: string;
+}
+
+interface MultiTurnResult {
+  turns: ConversationTurn[];
+  finalEvaluation: EvaluationResult;
+  totalResponseTime: number;
+}
+
 interface SaveResponse {
   success: boolean;
   fileName?: string;
   message?: string;
 }
 
-// Az Evaluációs Központ fő komponense.
 export default function EvaluationDashboard() {
   const [evaluationType, setEvaluationType] =
     useState<EvaluationType>("single-turn");
@@ -99,75 +102,89 @@ export default function EvaluationDashboard() {
     "Az asszisztens kizárólag a receptadatbázis alapján válaszoljon."
   );
 
+  const [multiTurnQuestions, setMultiTurnQuestions] = useState([
+    "Ajánlj egy egyszerű vacsorát!",
+    "Legyen húsmentes.",
+    "Tejterméket sem fogyaszthatok. Mit ajánlasz az eddigi feltételek alapján?",
+  ]);
+
   const [singleResult, setSingleResult] =
     useState<EvaluationResult | null>(null);
 
   const [abResults, setAbResults] =
     useState<EvaluationResult[]>([]);
 
+  const [multiTurnResult, setMultiTurnResult] =
+    useState<MultiTurnResult | null>(null);
+
   const [savedFileName, setSavedFileName] = useState("");
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
   const [isRunning, setIsRunning] = useState(false);
 
-  // Lefuttatja az asszisztenst és az LLM Judge értékelést.
-  async function runAssistantAndJudge(
-    variant: PromptVariant,
-    normalizedQuestion: string,
-    normalizedExpectation: string
-  ): Promise<EvaluationResult> {
-    if (variant === "strict") {
-      setStatus("A szigorúan forráshű változat fut...");
-    } else {
-      setStatus("A beszélgető és ajánló változat fut...");
-    }
-
+  // Meghívja a meglévő receptasszisztens API-t.
+  async function requestChat(
+    message: string,
+    variant: PromptVariant
+  ) {
     const startTime = performance.now();
 
-    const chatResponse = await fetch("/api/chat", {
+    const response = await fetch("/api/chat", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        message: normalizedQuestion,
+        message,
         systemPromptVariant: variant,
       }),
     });
 
-    const chatContentType =
-      chatResponse.headers.get("content-type") || "";
+    const contentType =
+      response.headers.get("content-type") || "";
 
-    if (!chatContentType.includes("application/json")) {
+    if (!contentType.includes("application/json")) {
       throw new Error(
         "A chat API nem JSON-választ adott."
       );
     }
 
-    const chatData = (await chatResponse.json()) as
+    const data = (await response.json()) as
       | ChatSuccess
       | ApiError;
 
-    if (!chatResponse.ok || !chatData.success) {
+    if (!response.ok || !data.success) {
       const message =
-        !chatData.success
-          ? chatData.error?.message ||
-            chatData.message ||
+        !data.success
+          ? data.error?.message ||
+            data.message ||
             "A receptasszisztens futtatása sikertelen."
           : "A receptasszisztens futtatása sikertelen.";
 
       throw new Error(message);
     }
 
-    const responseTime = performance.now() - startTime;
+    return {
+      data,
+      responseTime: performance.now() - startTime,
+    };
+  }
 
-    if (variant === "strict") {
-      setStatus("Az LLM Judge értékeli az A változatot...");
-    } else {
-      setStatus("Az LLM Judge értékeli a B változatot...");
-    }
-
-    const judgeResponse = await fetch(
+  // Meghívja az LLM as Judge értékelő API-t.
+  async function requestJudge({
+    evaluationType,
+    question,
+    answer,
+    conversation,
+    expectedBehavior,
+  }: {
+    evaluationType: "single-turn" | "multi-turn";
+    question?: string;
+    answer: string;
+    conversation?: string;
+    expectedBehavior: string;
+  }) {
+    const response = await fetch(
       "/api/evaluation/judge",
       {
         method: "POST",
@@ -175,55 +192,214 @@ export default function EvaluationDashboard() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          question: normalizedQuestion,
-          answer: chatData.answer,
-          expectedBehavior: normalizedExpectation,
+          evaluationType,
+          question,
+          answer,
+          conversation,
+          expectedBehavior,
         }),
       }
     );
 
-    const judgeContentType =
-      judgeResponse.headers.get("content-type") || "";
+    const contentType =
+      response.headers.get("content-type") || "";
 
-    if (!judgeContentType.includes("application/json")) {
+    if (!contentType.includes("application/json")) {
       throw new Error(
         "A Judge API nem JSON-választ adott."
       );
     }
 
-    const judgeData = (await judgeResponse.json()) as
+    const data = (await response.json()) as
       | JudgeSuccess
       | ApiError;
 
-    if (!judgeResponse.ok || !judgeData.success) {
+    if (!response.ok || !data.success) {
       const message =
-        !judgeData.success
-          ? judgeData.message ||
-            judgeData.error?.message ||
+        !data.success
+          ? data.message ||
+            data.error?.message ||
             "Az LLM Judge értékelése sikertelen."
           : "Az LLM Judge értékelése sikertelen.";
 
       throw new Error(message);
     }
 
+    return data;
+  }
+
+  // Lefuttat egy single-turn tesztet és a Judge értékelést.
+  async function runAssistantAndJudge(
+    variant: PromptVariant,
+    normalizedQuestion: string,
+    normalizedExpectation: string
+  ): Promise<EvaluationResult> {
+    setStatus(
+      variant === "strict"
+        ? "A szigorúan forráshű változat fut..."
+        : "A beszélgető és ajánló változat fut..."
+    );
+
+    const chat = await requestChat(
+      normalizedQuestion,
+      variant
+    );
+
+    setStatus("Az LLM Judge értékeli a választ...");
+
+    const judge = await requestJudge({
+      evaluationType: "single-turn",
+      question: normalizedQuestion,
+      answer: chat.data.answer,
+      expectedBehavior: normalizedExpectation,
+    });
+
     return {
-      answer: chatData.answer,
-      answerModel: chatData.model,
-      promptVariant: chatData.systemPromptVariant,
-      responseTime,
-      resultCount: chatData.retrieval.resultCount,
-      contextCount: chatData.retrieval.contextCount,
-      sources: chatData.sources,
-      judgeModel: judgeData.model,
-      judge: judgeData.result,
+      answer: chat.data.answer,
+      answerModel: chat.data.model,
+      promptVariant: chat.data.systemPromptVariant,
+      responseTime: chat.responseTime,
+      resultCount: chat.data.retrieval.resultCount,
+      contextCount: chat.data.retrieval.contextCount,
+      sources: chat.data.sources,
+      judgeModel: judge.model,
+      judge: judge.result,
     };
   }
 
-  // A teszteredményt elküldi a fájlmentő API-nak.
+  // Elkészíti a következő Multi-turn forduló rövidített üzenetét.
+  function createMultiTurnMessage(
+    turns: ConversationTurn[],
+    currentQuestion: string
+  ) {
+    if (turns.length === 0) {
+      return currentQuestion.slice(0, 1900);
+    }
+
+    // Csak a korábbi felhasználói feltételeket továbbítjuk.
+    // A hosszú asszisztensválaszokat nem küldjük újra.
+    const previousUserRequests = turns
+      .map((turn, index) => {
+        const shortenedRequest = turn.user.slice(0, 300);
+
+        return (
+          `${index + 1}. korábbi kérés: ` +
+          shortenedRequest
+        );
+      })
+      .join("\n");
+
+    // Az aktuális kérésből legfeljebb 900 karaktert használunk.
+    const shortenedCurrentQuestion =
+      currentQuestion.slice(0, 900);
+
+    const message =
+      "Korábbi felhasználói feltételek:\n" +
+      previousUserRequests +
+      "\n\nAktuális kérés:\n" +
+      shortenedCurrentQuestion +
+      "\n\nVedd figyelembe az összes korábbi feltételt.";
+
+    // További biztonsági korlát a 2000 karakteres API-limit miatt.
+    return message.slice(0, 1900);
+  }
+
+  // Lefuttatja a teljes Multi-turn beszélgetést.
+  async function runMultiTurnTest(
+    questions: string[],
+    expectation: string
+  ): Promise<MultiTurnResult> {
+    const turns: ConversationTurn[] = [];
+
+    let totalResponseTime = 0;
+    let lastChat: ChatSuccess | null = null;
+    let lastResponseTime = 0;
+
+    for (
+      let turnIndex = 0;
+      turnIndex < questions.length;
+      turnIndex += 1
+    ) {
+      const currentQuestion = questions[turnIndex];
+
+      setStatus(
+        `Multi-turn teszt: ${turnIndex + 1}. forduló fut...`
+      );
+
+      const multiTurnMessage = createMultiTurnMessage(
+        turns,
+        currentQuestion
+      );
+
+      const chat = await requestChat(
+        multiTurnMessage,
+        promptVariant
+      );
+
+      lastChat = chat.data;
+      lastResponseTime = chat.responseTime;
+      totalResponseTime += chat.responseTime;
+
+      turns.push({
+        user: currentQuestion,
+        assistant: chat.data.answer,
+      });
+    }
+
+    if (!lastChat || turns.length === 0) {
+      throw new Error(
+        "A multi-turn beszélgetés nem adott eredményt."
+      );
+    }
+
+    setStatus(
+      "Az LLM Judge értékeli a teljes beszélgetést..."
+    );
+
+    // A Judge a teljes, rövidítetlen beszélgetést kapja meg.
+    const conversationText = turns
+      .map(
+        (turn, index) =>
+          `${index + 1}. forduló\n` +
+          `Felhasználó: ${turn.user}\n` +
+          `Asszisztens: ${turn.assistant}`
+      )
+      .join("\n\n");
+
+    const finalAnswer =
+      turns[turns.length - 1].assistant;
+
+    const judge = await requestJudge({
+      evaluationType: "multi-turn",
+      answer: finalAnswer,
+      conversation: conversationText,
+      expectedBehavior: expectation,
+    });
+
+    const finalEvaluation: EvaluationResult = {
+      answer: finalAnswer,
+      answerModel: lastChat.model,
+      promptVariant: lastChat.systemPromptVariant,
+      responseTime: lastResponseTime,
+      resultCount: lastChat.retrieval.resultCount,
+      contextCount: lastChat.retrieval.contextCount,
+      sources: lastChat.sources,
+      judgeModel: judge.model,
+      judge: judge.result,
+    };
+
+    return {
+      turns,
+      finalEvaluation,
+      totalResponseTime,
+    };
+  }
+
+  // Külön JSON-fájlba menti a teszteredményt.
   async function saveEvaluation(data: object) {
     setStatus("A teszteredmény mentése...");
 
-    const saveResponse = await fetch(
+    const response = await fetch(
       "/api/evaluation/save",
       {
         method: "POST",
@@ -234,47 +410,49 @@ export default function EvaluationDashboard() {
       }
     );
 
-    const saveContentType =
-      saveResponse.headers.get("content-type") || "";
+    const contentType =
+      response.headers.get("content-type") || "";
 
-    if (!saveContentType.includes("application/json")) {
+    if (!contentType.includes("application/json")) {
       throw new Error(
         "A mentési API nem JSON-választ adott."
       );
     }
 
-    const saveData =
-      (await saveResponse.json()) as SaveResponse;
+    const dataFromApi =
+      (await response.json()) as SaveResponse;
 
-    if (!saveResponse.ok || !saveData.success) {
+    if (!response.ok || !dataFromApi.success) {
       throw new Error(
-        saveData.message ||
+        dataFromApi.message ||
           "A teszteredmény mentése sikertelen."
       );
     }
 
-    setSavedFileName(saveData.fileName ?? "");
+    setSavedFileName(dataFromApi.fileName ?? "");
   }
 
-  // Lefuttatja a kiválasztott teszttípust.
+  // Lefuttatja a felületen kiválasztott teszttípust.
   async function runTest() {
     const normalizedQuestion = question.trim();
     const normalizedExpectation = expectedBehavior.trim();
 
-    if (!normalizedQuestion) {
-      setError("A tesztkérdés nem lehet üres.");
-      return;
-    }
-
     setIsRunning(true);
     setSingleResult(null);
     setAbResults([]);
+    setMultiTurnResult(null);
     setSavedFileName("");
     setStatus("");
     setError("");
 
     try {
       if (evaluationType === "single-turn") {
+        if (!normalizedQuestion) {
+          throw new Error(
+            "A tesztkérdés nem lehet üres."
+          );
+        }
+
         const result = await runAssistantAndJudge(
           promptVariant,
           normalizedQuestion,
@@ -298,6 +476,12 @@ export default function EvaluationDashboard() {
       }
 
       if (evaluationType === "ab-test") {
+        if (!normalizedQuestion) {
+          throw new Error(
+            "A tesztkérdés nem lehet üres."
+          );
+        }
+
         const strictResult = await runAssistantAndJudge(
           "strict",
           normalizedQuestion,
@@ -326,7 +510,42 @@ export default function EvaluationDashboard() {
         });
 
         setStatus(
-          "Az A/B teszt és az eredmények mentése elkészült."
+          "Az A/B teszt és a mentés elkészült."
+        );
+
+        return;
+      }
+
+      if (evaluationType === "multi-turn") {
+        const questions = multiTurnQuestions
+          .map((item) => item.trim())
+          .filter(Boolean);
+
+        if (questions.length < 2) {
+          throw new Error(
+            "Legalább két beszélgetési fordulót adj meg."
+          );
+        }
+
+        const result = await runMultiTurnTest(
+          questions,
+          normalizedExpectation
+        );
+
+        setMultiTurnResult(result);
+
+        await saveEvaluation({
+          evaluationType: "multi-turn",
+          promptVariant,
+          expectedBehavior: normalizedExpectation,
+          questions,
+          turns: result.turns,
+          totalResponseTime: result.totalResponseTime,
+          finalEvaluation: result.finalEvaluation,
+        });
+
+        setStatus(
+          "A multi-turn teszt és a mentés elkészült."
         );
 
         return;
@@ -348,6 +567,18 @@ export default function EvaluationDashboard() {
     }
   }
 
+  // Módosítja valamelyik Multi-turn kérdés értékét.
+  function updateMultiTurnQuestion(
+    index: number,
+    value: string
+  ) {
+    setMultiTurnQuestions((current) =>
+      current.map((item, itemIndex) =>
+        itemIndex === index ? value : item
+      )
+    );
+  }
+
   return (
     <div className={styles.page}>
       <header className={styles.header}>
@@ -358,7 +589,7 @@ export default function EvaluationDashboard() {
         <h1>Evaluációs Központ</h1>
 
         <p>
-          Single-turn és prompt A/B tesztelés
+          Single-turn, A/B és Multi-turn tesztelés
           automatikus LLM as Judge értékeléssel.
         </p>
       </header>
@@ -386,8 +617,8 @@ export default function EvaluationDashboard() {
               Prompt A/B teszt
             </option>
 
-            <option value="multi-turn" disabled>
-              Multi-turn evaluáció, hamarosan
+            <option value="multi-turn">
+              Multi-turn evaluáció
             </option>
 
             <option value="rag" disabled>
@@ -396,7 +627,7 @@ export default function EvaluationDashboard() {
           </select>
         </label>
 
-        {evaluationType === "single-turn" && (
+        {evaluationType !== "ab-test" && (
           <label className={styles.field}>
             <span>System prompt</span>
 
@@ -425,26 +656,67 @@ export default function EvaluationDashboard() {
             <strong>A/B teszt</strong>
 
             <p>
-              Ugyanaz a kérdés lefut a szigorúan
-              forráshű és a beszélgető, ajánló
-              prompttal is.
+              A kérdés mindkét rendszerprompttal
+              automatikusan lefut.
             </p>
           </div>
         )}
 
-        <label className={styles.field}>
-          <span>Tesztkérdés</span>
+        {evaluationType !== "multi-turn" && (
+          <label className={styles.field}>
+            <span>Tesztkérdés</span>
 
-          <textarea
-            value={question}
-            onChange={(event) =>
-              setQuestion(event.target.value)
-            }
-            rows={4}
-            maxLength={2000}
-            disabled={isRunning}
-          />
-        </label>
+            <textarea
+              value={question}
+              onChange={(event) =>
+                setQuestion(event.target.value)
+              }
+              rows={4}
+              maxLength={2000}
+              disabled={isRunning}
+            />
+          </label>
+        )}
+
+        {evaluationType === "multi-turn" && (
+          <div>
+            <div className={styles.answer}>
+              <strong>Multi-turn beszélgetés</strong>
+
+              <p>
+                A fordulók egymásra épülnek. A következő
+                forduló megkapja a korábbi felhasználói
+                feltételek rövidített változatát.
+              </p>
+            </div>
+
+            {multiTurnQuestions.map(
+              (turnQuestion, index) => (
+                <label
+                  className={styles.field}
+                  key={index}
+                >
+                  <span>
+                    {index + 1}. felhasználói forduló
+                  </span>
+
+                  <textarea
+                    value={turnQuestion}
+                    onChange={(event) =>
+                      updateMultiTurnQuestion(
+                        index,
+                        event.target.value
+                      )
+                    }
+                    rows={3}
+                    maxLength={900}
+                    disabled={isRunning}
+                  />
+                </label>
+              )
+            )}
+          </div>
+        )}
 
         <label className={styles.field}>
           <span>Elvárt viselkedés</span>
@@ -464,7 +736,7 @@ export default function EvaluationDashboard() {
           className={styles.runButton}
           type="button"
           onClick={runTest}
-          disabled={isRunning || !question.trim()}
+          disabled={isRunning}
         >
           {isRunning
             ? "Teszt futtatása..."
@@ -495,6 +767,7 @@ export default function EvaluationDashboard() {
         <ResultPanel
           title="Single-turn eredmény"
           result={singleResult}
+          showMultiTurnScores={false}
         />
       )}
 
@@ -505,12 +778,12 @@ export default function EvaluationDashboard() {
 
             <div className={styles.metrics}>
               <Metric
-                label="A változat pontszáma"
+                label="A változat"
                 value={`${abResults[0].judge.overallScore}/5`}
               />
 
               <Metric
-                label="B változat pontszáma"
+                label="B változat"
                 value={`${abResults[1].judge.overallScore}/5`}
               />
 
@@ -532,26 +805,84 @@ export default function EvaluationDashboard() {
                 }
               />
             </div>
-
-            <p>
-              <strong>A változat:</strong>{" "}
-              szigorúan forráshű
-            </p>
-
-            <p>
-              <strong>B változat:</strong>{" "}
-              beszélgető és ajánló
-            </p>
           </section>
 
           <ResultPanel
             title="A változat: Szigorúan forráshű"
             result={abResults[0]}
+            showMultiTurnScores={false}
           />
 
           <ResultPanel
             title="B változat: Beszélgető és ajánló"
             result={abResults[1]}
+            showMultiTurnScores={false}
+          />
+        </>
+      )}
+
+      {multiTurnResult && (
+        <>
+          <section className={styles.panel}>
+            <h2>Multi-turn beszélgetés</h2>
+
+            <div className={styles.metrics}>
+              <Metric
+                label="Fordulók száma"
+                value={String(
+                  multiTurnResult.turns.length
+                )}
+              />
+
+              <Metric
+                label="Teljes válaszidő"
+                value={`${(
+                  multiTurnResult.totalResponseTime /
+                  1000
+                ).toFixed(2)} s`}
+              />
+
+              <Metric
+                label="Kontextusmegőrzés"
+                value={
+                  `${multiTurnResult.finalEvaluation.judge.contextRetention}/5`
+                }
+              />
+
+              <Metric
+                label="Következetesség"
+                value={
+                  `${multiTurnResult.finalEvaluation.judge.consistency}/5`
+                }
+              />
+            </div>
+
+            {multiTurnResult.turns.map(
+              (turn, index) => (
+                <div
+                  className={styles.answer}
+                  key={index}
+                >
+                  <h3>{index + 1}. forduló</h3>
+
+                  <p>
+                    <strong>Felhasználó:</strong>{" "}
+                    {turn.user}
+                  </p>
+
+                  <p>
+                    <strong>Asszisztens:</strong>{" "}
+                    {turn.assistant}
+                  </p>
+                </div>
+              )
+            )}
+          </section>
+
+          <ResultPanel
+            title="Multi-turn összesített értékelés"
+            result={multiTurnResult.finalEvaluation}
+            showMultiTurnScores
           />
         </>
       )}
@@ -559,13 +890,14 @@ export default function EvaluationDashboard() {
   );
 }
 
-// Egy tesztváltozat teljes eredményét jeleníti meg.
 function ResultPanel({
   title,
   result,
+  showMultiTurnScores,
 }: {
   title: string;
   result: EvaluationResult;
+  showMultiTurnScores: boolean;
 }) {
   return (
     <>
@@ -602,7 +934,7 @@ function ResultPanel({
         </div>
 
         <div className={styles.answer}>
-          <h3>Asszisztens válasza</h3>
+          <h3>Utolsó asszisztensválasz</h3>
           <p>{result.answer}</p>
         </div>
       </section>
@@ -618,7 +950,9 @@ function ResultPanel({
 
           <Metric
             label="Utasításkövetés"
-            value={`${result.judge.instructionFollowing}/5`}
+            value={
+              `${result.judge.instructionFollowing}/5`
+            }
           />
 
           <Metric
@@ -630,6 +964,22 @@ function ResultPanel({
             label="Érthetőség"
             value={`${result.judge.clarity}/5`}
           />
+
+          {showMultiTurnScores && (
+            <>
+              <Metric
+                label="Kontextusmegőrzés"
+                value={
+                  `${result.judge.contextRetention}/5`
+                }
+              />
+
+              <Metric
+                label="Következetesség"
+                value={`${result.judge.consistency}/5`}
+              />
+            </>
+          )}
 
           <Metric
             label="Összpontszám"
@@ -662,7 +1012,7 @@ function ResultPanel({
       </section>
 
       <section className={styles.panel}>
-        <h2>RAG-források</h2>
+        <h2>Utolsó forduló RAG-forrásai</h2>
 
         {result.sources.length === 0 ? (
           <p>Nem volt releváns keresési találat.</p>
@@ -691,7 +1041,6 @@ function ResultPanel({
   );
 }
 
-// Egy mérőszámot jelenít meg.
 function Metric({
   label,
   value,
