@@ -2,6 +2,10 @@
 
 import { useState } from "react";
 import styles from "./EvaluationDashboard.module.css";
+import {
+  evaluateRagResult,
+  type RagCheckResult,
+} from "../../lib/evaluation/rag-evaluation";
 
 type EvaluationType =
   | "single-turn"
@@ -81,6 +85,13 @@ interface MultiTurnResult {
   totalResponseTime: number;
 }
 
+interface RagEvaluationResult {
+  evaluation: EvaluationResult;
+  ragCheck: RagCheckResult;
+  expectedSource: string;
+  minimumSimilarity: number;
+}
+
 interface SaveResponse {
   success: boolean;
   fileName?: string;
@@ -102,6 +113,11 @@ export default function EvaluationDashboard() {
     "Az asszisztens kizárólag a receptadatbázis alapján válaszoljon."
   );
 
+  const [expectedSource, setExpectedSource] = useState("");
+
+  const [minimumSimilarity, setMinimumSimilarity] =
+    useState(0.5);
+
   const [multiTurnQuestions, setMultiTurnQuestions] = useState([
     "Ajánlj egy egyszerű vacsorát!",
     "Legyen húsmentes.",
@@ -116,6 +132,9 @@ export default function EvaluationDashboard() {
 
   const [multiTurnResult, setMultiTurnResult] =
     useState<MultiTurnResult | null>(null);
+
+  const [ragResult, setRagResult] =
+    useState<RagEvaluationResult | null>(null);
 
   const [savedFileName, setSavedFileName] = useState("");
   const [status, setStatus] = useState("");
@@ -170,7 +189,7 @@ export default function EvaluationDashboard() {
     };
   }
 
-  // Meghívja az LLM as Judge értékelő API-t.
+  // Meghívja az LLM as Judge API-t.
   async function requestJudge({
     evaluationType,
     question,
@@ -228,7 +247,7 @@ export default function EvaluationDashboard() {
     return data;
   }
 
-  // Lefuttat egy single-turn tesztet és a Judge értékelést.
+  // Lefuttatja az asszisztenst és a Judge értékelést.
   async function runAssistantAndJudge(
     variant: PromptVariant,
     normalizedQuestion: string,
@@ -267,7 +286,7 @@ export default function EvaluationDashboard() {
     };
   }
 
-  // Elkészíti a következő Multi-turn forduló rövidített üzenetét.
+  // Elkészíti a következő Multi-turn forduló rövid üzenetét.
   function createMultiTurnMessage(
     turns: ConversationTurn[],
     currentQuestion: string
@@ -276,8 +295,6 @@ export default function EvaluationDashboard() {
       return currentQuestion.slice(0, 1900);
     }
 
-    // Csak a korábbi felhasználói feltételeket továbbítjuk.
-    // A hosszú asszisztensválaszokat nem küldjük újra.
     const previousUserRequests = turns
       .map((turn, index) => {
         const shortenedRequest = turn.user.slice(0, 300);
@@ -289,7 +306,6 @@ export default function EvaluationDashboard() {
       })
       .join("\n");
 
-    // Az aktuális kérésből legfeljebb 900 karaktert használunk.
     const shortenedCurrentQuestion =
       currentQuestion.slice(0, 900);
 
@@ -300,7 +316,6 @@ export default function EvaluationDashboard() {
       shortenedCurrentQuestion +
       "\n\nVedd figyelembe az összes korábbi feltételt.";
 
-    // További biztonsági korlát a 2000 karakteres API-limit miatt.
     return message.slice(0, 1900);
   }
 
@@ -356,7 +371,6 @@ export default function EvaluationDashboard() {
       "Az LLM Judge értékeli a teljes beszélgetést..."
     );
 
-    // A Judge a teljes, rövidítetlen beszélgetést kapja meg.
     const conversationText = turns
       .map(
         (turn, index) =>
@@ -432,7 +446,7 @@ export default function EvaluationDashboard() {
     setSavedFileName(dataFromApi.fileName ?? "");
   }
 
-  // Lefuttatja a felületen kiválasztott teszttípust.
+  // Lefuttatja a kiválasztott teszttípust.
   async function runTest() {
     const normalizedQuestion = question.trim();
     const normalizedExpectation = expectedBehavior.trim();
@@ -441,6 +455,7 @@ export default function EvaluationDashboard() {
     setSingleResult(null);
     setAbResults([]);
     setMultiTurnResult(null);
+    setRagResult(null);
     setSavedFileName("");
     setStatus("");
     setError("");
@@ -551,6 +566,65 @@ export default function EvaluationDashboard() {
         return;
       }
 
+      if (evaluationType === "rag") {
+        if (!normalizedQuestion) {
+          throw new Error(
+            "A tesztkérdés nem lehet üres."
+          );
+        }
+
+        if (
+          minimumSimilarity < 0 ||
+          minimumSimilarity > 1
+        ) {
+          throw new Error(
+            "A minimális hasonlóság 0 és 1 közötti érték legyen."
+          );
+        }
+
+        setStatus("A RAG-teszt fut...");
+
+        const evaluation =
+          await runAssistantAndJudge(
+            promptVariant,
+            normalizedQuestion,
+            normalizedExpectation
+          );
+
+        const ragCheck = evaluateRagResult({
+          sources: evaluation.sources,
+          resultCount: evaluation.resultCount,
+          contextCount: evaluation.contextCount,
+          expectedSource: expectedSource.trim(),
+          minimumSimilarity,
+        });
+
+        const completedRagResult = {
+          evaluation,
+          ragCheck,
+          expectedSource: expectedSource.trim(),
+          minimumSimilarity,
+        };
+
+        setRagResult(completedRagResult);
+
+        await saveEvaluation({
+          evaluationType: "rag",
+          question: normalizedQuestion,
+          expectedBehavior: normalizedExpectation,
+          expectedSource: expectedSource.trim(),
+          minimumSimilarity,
+          evaluation,
+          ragCheck,
+        });
+
+        setStatus(
+          "A RAG-szintű teszt és a mentés elkészült."
+        );
+
+        return;
+      }
+
       throw new Error(
         "Ez a teszttípus még nem használható."
       );
@@ -567,7 +641,7 @@ export default function EvaluationDashboard() {
     }
   }
 
-  // Módosítja valamelyik Multi-turn kérdés értékét.
+  // Módosítja valamelyik Multi-turn kérdést.
   function updateMultiTurnQuestion(
     index: number,
     value: string
@@ -589,8 +663,8 @@ export default function EvaluationDashboard() {
         <h1>Evaluációs Központ</h1>
 
         <p>
-          Single-turn, A/B és Multi-turn tesztelés
-          automatikus LLM as Judge értékeléssel.
+          Single-turn, A/B, Multi-turn és RAG-szintű
+          tesztelés automatikus értékeléssel.
         </p>
       </header>
 
@@ -621,8 +695,8 @@ export default function EvaluationDashboard() {
               Multi-turn evaluáció
             </option>
 
-            <option value="rag" disabled>
-              RAG-szintű evaluáció, hamarosan
+            <option value="rag">
+              RAG-szintű evaluáció
             </option>
           </select>
         </label>
@@ -684,9 +758,9 @@ export default function EvaluationDashboard() {
               <strong>Multi-turn beszélgetés</strong>
 
               <p>
-                A fordulók egymásra épülnek. A következő
-                forduló megkapja a korábbi felhasználói
-                feltételek rövidített változatát.
+                A fordulók egymásra épülnek, és a
+                korábbi felhasználói feltételek
+                továbbadásra kerülnek.
               </p>
             </div>
 
@@ -716,6 +790,47 @@ export default function EvaluationDashboard() {
               )
             )}
           </div>
+        )}
+
+        {evaluationType === "rag" && (
+          <>
+            <label className={styles.field}>
+              <span>
+                Elvárt dokumentum vagy recept neve
+              </span>
+
+              <input
+                type="text"
+                value={expectedSource}
+                onChange={(event) =>
+                  setExpectedSource(event.target.value)
+                }
+                placeholder="Például: túrós palacsinta"
+                disabled={isRunning}
+              />
+            </label>
+
+            <label className={styles.field}>
+              <span>
+                Minimális hasonlóság:{" "}
+                {minimumSimilarity.toFixed(2)}
+              </span>
+
+              <input
+                type="number"
+                min="0"
+                max="1"
+                step="0.05"
+                value={minimumSimilarity}
+                onChange={(event) =>
+                  setMinimumSimilarity(
+                    Number(event.target.value)
+                  )
+                }
+                disabled={isRunning}
+              />
+            </label>
+          </>
         )}
 
         <label className={styles.field}>
@@ -886,6 +1001,89 @@ export default function EvaluationDashboard() {
           />
         </>
       )}
+
+      {ragResult && (
+        <>
+          <section className={styles.panel}>
+            <h2>RAG-szintű ellenőrzés</h2>
+
+            <div className={styles.metrics}>
+              <Metric
+                label="Keresési találat"
+                value={
+                  ragResult.ragCheck.hasResults
+                    ? "Igen"
+                    : "Nem"
+                }
+              />
+
+              <Metric
+                label="RAG-kontextus"
+                value={
+                  ragResult.ragCheck.hasContext
+                    ? "Igen"
+                    : "Nem"
+                }
+              />
+
+              <Metric
+                label="Elvárt forrás"
+                value={
+                  ragResult.ragCheck.expectedSourceFound
+                    ? "Megtalálva"
+                    : "Nincs találat"
+                }
+              />
+
+              <Metric
+                label="Legjobb hasonlóság"
+                value={
+                  ragResult.ragCheck.bestSimilarity.toFixed(3)
+                }
+              />
+
+              <Metric
+                label="Minimum küszöb"
+                value={
+                  ragResult.minimumSimilarity.toFixed(3)
+                }
+              />
+            </div>
+
+            <div
+              className={
+                ragResult.ragCheck.passed
+                  ? styles.passed
+                  : styles.failed
+              }
+            >
+              {ragResult.ragCheck.passed
+                ? "A RAG-teszt megfelelt"
+                : "A RAG-teszt nem felelt meg"}
+            </div>
+
+            <div className={styles.answer}>
+              <h3>Szabályalapú értékelés</h3>
+
+              <p>
+                {ragResult.ragCheck.explanation}
+              </p>
+
+              <p>
+                <strong>Elvárt dokumentum:</strong>{" "}
+                {ragResult.expectedSource ||
+                  "Nem volt külön megadva"}
+              </p>
+            </div>
+          </section>
+
+          <ResultPanel
+            title="RAG-teszt asszisztensértékelése"
+            result={ragResult.evaluation}
+            showMultiTurnScores={false}
+          />
+        </>
+      )}
     </div>
   );
 }
@@ -934,7 +1132,7 @@ function ResultPanel({
         </div>
 
         <div className={styles.answer}>
-          <h3>Utolsó asszisztensválasz</h3>
+          <h3>Asszisztens válasza</h3>
           <p>{result.answer}</p>
         </div>
       </section>
@@ -1012,7 +1210,7 @@ function ResultPanel({
       </section>
 
       <section className={styles.panel}>
-        <h2>Utolsó forduló RAG-forrásai</h2>
+        <h2>RAG-források</h2>
 
         {result.sources.length === 0 ? (
           <p>Nem volt releváns keresési találat.</p>

@@ -55,8 +55,10 @@
 }
 
 .field select,
-.field textarea {
+.field textarea,
+.field input {
   width: 100%;
+  box-sizing: border-box;
   padding: 11px 12px;
   border: 1px solid #cbd5e1;
   border-radius: 8px;
@@ -70,9 +72,18 @@
 }
 
 .field select:focus,
-.field textarea:focus {
+.field textarea:focus,
+.field input:focus {
   border-color: #2563eb;
   outline: 2px solid rgba(37, 99, 235, 0.15);
+}
+
+.field select:disabled,
+.field textarea:disabled,
+.field input:disabled {
+  background: #f1f5f9;
+  color: #64748b;
+  cursor: not-allowed;
 }
 
 .runButton {
@@ -86,13 +97,38 @@
   cursor: pointer;
 }
 
-.runButton:hover {
+.runButton:hover:not(:disabled) {
   background: #26334d;
 }
 
 .runButton:disabled {
   background: #94a3b8;
   cursor: not-allowed;
+}
+
+.status {
+  margin-top: 14px;
+  color: #475569;
+  font-weight: 600;
+}
+
+.savedFile {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid #93c5fd;
+  border-radius: 8px;
+  background: #eff6ff;
+  color: #1e40af;
+  overflow-wrap: anywhere;
+}
+
+.error {
+  margin-bottom: 20px;
+  padding: 16px;
+  border: 1px solid #fca5a5;
+  border-radius: 10px;
+  background: #fef2f2;
+  color: #991b1b;
 }
 
 .metrics {
@@ -106,6 +142,7 @@
 }
 
 .metric {
+  min-width: 0;
   padding: 14px;
   border-radius: 10px;
   background: #f1f5f9;
@@ -120,6 +157,10 @@
   margin-bottom: 6px;
   color: #526174;
   font-size: 0.85rem;
+}
+
+.metric strong {
+  overflow-wrap: anywhere;
 }
 
 .answer,
@@ -140,45 +181,8 @@
 .answer p,
 .expected p {
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
   line-height: 1.6;
-}
-
-.sources ul {
-  margin-bottom: 0;
-  padding-left: 22px;
-}
-
-.sources li {
-  margin-bottom: 8px;
-  line-height: 1.5;
-}
-
-.error {
-  margin-bottom: 20px;
-  padding: 16px;
-  border: 1px solid #fca5a5;
-  border-radius: 10px;
-  background: #fef2f2;
-  color: #991b1b;
-}
-
-@media (max-width: 700px) {
-  .page {
-    padding: 24px 16px;
-  }
-
-  .panel {
-    padding: 18px;
-  }
-
-  .metrics {
-    grid-template-columns: 1fr;
-  }
-}
-.status {
-  margin-top: 14px;
-  color: #475569;
-  font-weight: 600;
 }
 
 .passed,
@@ -203,10 +207,44 @@
 }
 
 .sourceList {
+  margin-bottom: 0;
   padding-left: 22px;
 }
 
 .sourceList li {
   margin-bottom: 8px;
+  overflow-wrap: anywhere;
   line-height: 1.5;
+}
+
+.sources ul {
+  margin-bottom: 0;
+  padding-left: 22px;
+}
+
+.sources li {
+  margin-bottom: 8px;
+  line-height: 1.5;
+}
+
+@media (max-width: 700px) {
+  .page {
+    padding: 24px 16px;
+  }
+
+  .header h1 {
+    font-size: 1.7rem;
+  }
+
+  .panel {
+    padding: 18px;
+  }
+
+  .metrics {
+    grid-template-columns: 1fr;
+  }
+
+  .runButton {
+    width: 100%;
+  }
 }
