@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import styles from "./EvaluationDashboard.module.css";
+import HumanReviewForm from "./HumanReviewForm";
 import {
   evaluateRagResult,
   type RagCheckResult,
@@ -140,6 +141,15 @@ export default function EvaluationDashboard() {
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
   const [isRunning, setIsRunning] = useState(false);
+// Meghatározza az utolsó futtatás Judge-eredményét.
+const currentJudgePassed =
+  singleResult?.judge.passed ??
+  multiTurnResult?.finalEvaluation.judge.passed ??
+  ragResult?.evaluation.judge.passed ??
+  (abResults.length === 2
+    ? abResults[0].judge.passed &&
+      abResults[1].judge.passed
+    : false);
 
   // Meghívja a meglévő receptasszisztens API-t.
   async function requestChat(
@@ -1083,6 +1093,13 @@ export default function EvaluationDashboard() {
             showMultiTurnScores={false}
           />
         </>
+      )}
+            {savedFileName && (
+        <HumanReviewForm
+          key={savedFileName}
+          evaluationFileName={savedFileName}
+          judgePassed={currentJudgePassed}
+        />
       )}
     </div>
   );
