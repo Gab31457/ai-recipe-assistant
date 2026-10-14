@@ -7,6 +7,8 @@ import type {
   KeyboardEvent,
 } from "react";
 
+import type { ChatMessageInput } from "@/lib/chat-types";
+
 import styles from "./ChatInterface.module.css";
 
 // A frontendről kiválasztható system prompt változatok.
@@ -149,6 +151,19 @@ export default function ChatInterface() {
       content: normalizedMessage,
     };
 
+    // A teljes eddigi beszélgetéshez hozzáadjuk
+    // az új felhasználói üzenetet.
+    const conversationMessages: ChatMessageInput[] = [
+      ...messages.map((message) => ({
+        role: message.role,
+        content: message.content,
+      })),
+      {
+        role: userMessage.role,
+        content: userMessage.content,
+      },
+    ];
+
     // A felhasználói üzenetet azonnal megjelenítjük.
     setMessages((currentMessages) => [
       ...currentMessages,
@@ -174,7 +189,7 @@ export default function ChatInterface() {
               "application/json",
           },
           body: JSON.stringify({
-            message: normalizedMessage,
+            messages: conversationMessages,
             limit: 5,
             minimumSimilarity: 0.2,
             systemPromptVariant:

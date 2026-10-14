@@ -1,5 +1,7 @@
 import OpenAI from "openai";
 
+import type { ChatMessageInput } from "@/lib/chat-types";
+
 import {
   getSystemPrompt,
   getSystemPromptVariant,
@@ -21,8 +23,11 @@ const DEFAULT_CHAT_MODEL = "gpt-4o-mini";
 
 // A RAG-válasz elkészítéséhez szükséges bemeneti adatok.
 export interface RagAnswerInput {
-  // A felhasználó eredeti kérdése.
+  // A felhasználó aktuális kérdése.
   question: string;
+
+  // A teljes strukturált beszélgetési előzmény.
+  messages?: ChatMessageInput[];
 
   // A pgvector keresés által visszaadott
   // releváns dokumentumchunkok.
@@ -137,6 +142,47 @@ function buildUserPrompt(
   ].join("\n");
 }
 
+// A teljes beszélgetést OpenAI input formátumra alakítja.
+// A friss RAG-kontextus csak az utolsó user üzenethez kerül.
+function buildConversationInput(
+  messages: ChatMessageInput[],
+  question: string,
+  context: string
+) {
+  const conversation =
+    messages.length > 0
+      ? messages
+      : [
+          {
+            role: "user" as const,
+            content: question,
+          },
+        ];
+
+  return conversation.map((message, index) => {
+    const isLastMessage =
+      index === conversation.length - 1;
+
+    if (
+      isLastMessage &&
+      message.role === "user"
+    ) {
+      return {
+        role: "user" as const,
+        content: buildUserPrompt(
+          message.content,
+          context
+        ),
+      };
+    }
+
+    return {
+      role: message.role,
+      content: message.content,
+    };
+  });
+}
+
 // A végleges RAG-válasz elkészítése.
 export async function generateRagAnswer(
   input: RagAnswerInput
@@ -204,7 +250,8 @@ export async function generateRagAnswer(
       instructions: getSystemPrompt(
         activeSystemPromptVariant
       ),
-      input: buildUserPrompt(
+      input: buildConversationInput(
+        input.messages ?? [],
         normalizedQuestion,
         context
       ),
