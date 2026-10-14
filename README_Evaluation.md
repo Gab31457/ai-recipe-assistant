@@ -2,93 +2,65 @@
 
 ## 1. A dokumentum célja
 
-Ez a dokumentum a meglévő AI Receptasszisztenshez készített Evaluációs Központ használatát és működését mutatja be.
+Ez a dokumentum a meglévő AI Receptasszisztenshez készített Evaluációs Központ aktuális használatát és működését mutatja be.
 
-Az Evaluációs Központ nem egy új AI-asszisztens. A felület a már elkészült receptasszisztens tesztelésére, automatikus értékelésére, emberi felülvizsgálatára és iteratív fejlesztésére szolgál.
+Az Evaluációs Központ nem külön asszisztens, hanem a már elkészült receptasszisztens tesztelésére, automatikus értékelésére, emberi felülvizsgálatára és iteratív fejlesztésére szolgáló felület.
 
-Az AI Receptasszisztens önálló dokumentációja a következő fájlban található:
-
-```text
-README_AI-Assystant.md
-```
-
-A projekt rövid indítási útmutatója:
+Kapcsolódó dokumentumok:
 
 ```text
 README.md
+README_AI-Assystant.md
+reflection.md
 ```
 
-## 2. Az Evaluációs Központ célja
+## 2. Indítás
 
-Az Evaluációs Központ fő céljai:
-
-- a meglévő AI-asszisztens mérhető tesztelése;
-- single-turn és multi-turn beszélgetések vizsgálata;
-- különböző rendszerpromptok összehasonlítása;
-- a RAG-alapú dokumentum-visszakeresés ellenőrzése;
-- automatikus LLM as Judge értékelés futtatása;
-- automatikus és emberi értékelés összevetése;
-- minden tesztfutás külön fájlba mentése;
-- baseline és iteráció utáni eredmények összehasonlítása;
-- egy célzott promptmódosítás hatásának visszamérése.
-
-A fejlesztés oktatási célú. A cél nem egy hibátlan, minden környezetben használható evaluációs platform létrehozása, hanem az LLM-alapú rendszerek mérésének és iteratív fejlesztésének gyakorlati bemutatása.
-
-## 3. Az Evaluációs Központ indítása
-
-A projekt gyökérkönyvtárában futtasd:
+A projekt gyökérkönyvtárában:
 
 ```powershell
 npm install
 npm run dev
 ```
 
-Az Evaluációs Központ címe:
+Elérési címek:
 
 ```text
-http://localhost:3000/evaluation
+AI Receptasszisztens: http://localhost:3000
+Evaluációs Központ:   http://localhost:3000/evaluation
 ```
 
-Az AI Receptasszisztens főoldala:
+A felületeket és az API-végpontokat nem kell külön elindítani. Az `npm run dev` az egész Next.js alkalmazást elindítja.
 
-```text
-http://localhost:3000
-```
+## 3. Az Evaluációs Központ célja
 
-Ha a 3000-es port foglalt, a Next.js másik portot használhat. Ebben az esetben a terminálban megjelenő címet kell használni, például:
+A felület az alábbiakat támogatja:
 
-```text
-http://localhost:3001/evaluation
-```
+- Single-turn evaluáció;
+- rendszerprompt A/B teszt;
+- adaptív Multi-turn evaluáció;
+- RAG-szintű evaluáció;
+- LLM as Judge automatikus értékelés;
+- tényleges forrásrészletek alapján végzett groundedness-ellenőrzés;
+- emberi értékelés;
+- automatikus JSON-eredménymentés;
+- baseline és iteráció összehasonlítása.
 
-Az evaluációs oldalt és az API-végpontokat nem kell külön paranccsal elindítani. Az `npm run dev` az egész Next.js alkalmazást elindítja.
+A projekt nem használ Braintrust vagy más külső evaluációs platformot.
 
-## 4. Megvalósított funkciók
-
-A felület az alábbi evaluációs funkciókat tartalmazza:
-
-- Single-turn evaluáció
-- Prompt A/B teszt
-- Multi-turn evaluáció
-- RAG-szintű evaluáció
-- LLM as Judge automatikus értékelés
-- szabályalapú RAG-ellenőrzés
-- válaszidő mérése
-- automatikus JSON-eredménymentés
-- emberi értékelés
-- baseline és iteráció összehasonlítása
-
-A projekt nem használ Braintrust vagy más külső online evaluációs platformot.
-
-## 5. Főbb fájlok és mappák
+## 4. Főbb fájlok
 
 ```text
 app/
 ├── evaluation/
 │   └── page.tsx
 └── api/
+    ├── chat/
+    │   └── route.ts
     └── evaluation/
         ├── judge/
+        │   └── route.ts
+        ├── simulate-user/
         │   └── route.ts
         ├── save/
         │   └── route.ts
@@ -98,253 +70,281 @@ app/
             └── route.ts
 
 components/
+├── ChatInterface.tsx
 └── evaluation/
     ├── EvaluationDashboard.tsx
-    ├── EvaluationDashboard.module.css
     ├── HumanReviewForm.tsx
-    ├── HumanReviewForm.module.css
-    ├── ResultsComparison.tsx
-    └── ResultsComparison.module.css
+    └── ResultsComparison.tsx
 
 lib/
+├── chat-types.ts
+├── rag.ts
 └── evaluation/
     └── rag-evaluation.ts
 
 data/
 └── evaluation-results/
-    └── mentett JSON-eredmények
 ```
 
-### Fájlok szerepe
+## 5. Strukturált beszélgetési előzmény
 
-#### `app/evaluation/page.tsx`
+A normál chat és a Multi-turn evaluáció már nem csak a legutolsó felhasználói üzenetet küldi el az `/api/chat` végpontnak. A frontend minden kérésnél strukturált üzenetlistát küld:
 
-Az Evaluációs Központ külön weboldala. Betölti a tesztfuttató és az eredmény-összehasonlító komponenseket.
+```json
+[
+  {
+    "role": "user",
+    "content": "Ajánlj egy egyszerű vacsorát!"
+  },
+  {
+    "role": "assistant",
+    "content": "Az első asszisztensválasz..."
+  },
+  {
+    "role": "user",
+    "content": "Húst nem fogyasztok."
+  }
+]
+```
 
-#### `components/evaluation/EvaluationDashboard.tsx`
+A backend a teljes beszélgetést továbbadja a modellnek. A RAG-keresési lekérdezés a legutóbbi legfeljebb négy felhasználói üzenetből készül. Az asszisztens korábbi válaszai nem kerülnek bele a vektorkeresési lekérdezésbe, de a válaszgeneráló modell látja azokat.
 
-Az evaluációs felület fő komponense. Kezeli a teszttípus kiválasztását, a tesztadatokat, az API-hívásokat és az eredmények megjelenítését.
+Ez lehetővé teszi a természetes visszautalások értelmezését, például:
 
-#### `app/api/evaluation/judge/route.ts`
-
-Az LLM as Judge szerveroldali végpontja. Pontozza az asszisztens válaszát vagy a teljes többfordulós beszélgetést.
-
-#### `app/api/evaluation/save/route.ts`
-
-Minden automatikus teszt eredményét külön JSON-fájlba menti.
-
-#### `app/api/evaluation/human-review/route.ts`
-
-Az emberi értékelést külön JSON-fájlba menti.
-
-#### `app/api/evaluation/results/route.ts`
-
-Beolvassa és egységes formában visszaadja a mentett automatikus eredményeket az összehasonlító felület számára.
-
-#### `lib/evaluation/rag-evaluation.ts`
-
-Szabályalapú RAG-ellenőrzést végez a találatok, a kontextus, az elvárt forrás és a hasonlósági küszöb alapján.
+```text
+És hogyan kell elkészíteni?
+Az előző recept tartalmaz tejterméket?
+```
 
 ## 6. Single-turn evaluáció
 
-A Single-turn evaluáció egyetlen felhasználói kérdést küld a meglévő receptasszisztensnek.
+A Single-turn teszt egyetlen kérdést küld az asszisztensnek.
 
-### Beállítható adatok
+Mért és mentett adatok:
 
-- rendszerprompt;
-- tesztkérdés;
-- elvárt viselkedés.
-
-### A futtatás során mért adatok
-
-- asszisztens válasza;
-- válaszmodell;
-- használt rendszerprompt;
+- asszisztensválasz;
+- használt modell;
+- rendszerprompt-változat;
 - válaszidő;
-- keresési találatok száma;
-- felhasznált RAG-kontextusok száma;
-- források és hasonlósági értékek;
-- LLM as Judge pontszámok.
+- találatok és kontextusok száma;
+- RAG-források;
+- Judge részpontszámok;
+- összpontszám és megfelelési állapot;
+- a forrásokkal nem alátámasztott állítások.
 
-### Példa
+Példa:
 
 ```text
-Tesztkérdés:
-Ajánlj egy gyors húsmentes vacsorát!
+Kérdés:
+Milyen hozzávalók szükségesek a túrós palacsintához?
 
 Elvárt viselkedés:
-Az asszisztens kizárólag a receptadatbázis alapján válaszoljon, és ne találjon ki hiányzó információt.
+Az asszisztens kizárólag a visszakeresett receptforrás alapján sorolja fel a hozzávalókat, és ne találjon ki hiányzó adatot.
 ```
 
 ## 7. Prompt A/B teszt
 
-Az A/B teszt ugyanazt a kérdést két rendszerprompttal futtatja:
+Az A/B teszt ugyanazt a kérdést futtatja két rendszerprompttal:
 
 ```text
 A változat: strict, szigorúan forráshű
 B változat: conversational, beszélgető és ajánló
 ```
 
-Mindkét változat esetében külön lefut:
+Mindkét válasz külön Judge-értékelést kap. A felület összehasonlítja:
 
-1. a receptasszisztens;
-2. az LLM as Judge értékelés.
-
-A felület összehasonlítja:
-
+- a válaszokat;
+- a részpontszámokat;
 - az összpontszámokat;
 - a válaszidőket;
-- a válaszokat;
-- a részletes Judge-pontszámokat;
-- a RAG-forrásokat.
+- a RAG-forrásokat;
+- a nem alátámasztott állításokat.
 
-Egy A/B futás két asszisztenshívást és két Judge-hívást végez.
+## 8. Adaptív Multi-turn evaluáció
 
-## 8. Multi-turn evaluáció
-
-A Multi-turn evaluáció több egymásra épülő felhasználói fordulót kezel.
-
-A jelenlegi felület három szerkeszthető felhasználói fordulót biztosít.
-
-### Példa tesztforgatókönyv
-
-```text
-1. forduló:
-Ajánlj egy egyszerű vacsorát!
-
-2. forduló:
-Legyen húsmentes.
-
-3. forduló:
-Tejterméket sem fogyaszthatok. Mit ajánlasz az eddigi feltételek alapján?
-```
-
-### Vizsgált tulajdonságok
-
-- korábbi feltételek megőrzése;
-- új feltételek hozzáadása;
-- kontextusmegőrzés;
-- beszélgetési következetesség;
-- utasításkövetés;
-- megalapozottság;
-- érthetőség;
-- összesített minőség.
-
-### A 2000 karakteres korlát kezelése
-
-A meglévő chat API legfeljebb 2000 karakteres üzenetet fogad. Emiatt a következő multi-turn forduló csak a korábbi felhasználói feltételek rövidített változatát kapja meg. A hosszú asszisztensválaszokat a rendszer nem küldi vissza a chat API-nak.
-
-A teljes, rövidítetlen beszélgetés ettől függetlenül:
-
-- megjelenik a felületen;
-- bekerül az eredményfájlba;
-- eljut az LLM Judge értékeléshez.
-
-Ez a megoldás oktatási célú egyszerűsítés. A meglévő `/api/chat` végpontot nem kellett strukturált `messages` tömb támogatásával átalakítani.
-
-## 9. RAG-szintű evaluáció
-
-A RAG-szintű evaluáció a válasz minősége mellett a dokumentum-visszakeresést is vizsgálja.
+A Multi-turn teszt nem három előre rögzített felhasználói mondatot használ. A beszélgetést egy külön User Simulator alakítja az asszisztens válaszai alapján.
 
 ### Beállítható adatok
 
-- tesztkérdés;
-- elvárt dokumentum vagy recept neve;
-- minimális hasonlósági érték;
+- felhasználói persona;
+- felhasználói cél;
+- rejtett feltételek;
+- kezdő felhasználói üzenet;
+- maximális fordulószám;
 - rendszerprompt;
 - elvárt viselkedés.
 
-### Szabályalapú ellenőrzések
-
-- volt-e keresési találat;
-- kapott-e RAG-kontextust a válaszgenerálás;
-- szerepel-e az elvárt dokumentum a források között;
-- eléri-e a legjobb találat a megadott hasonlósági küszöböt.
-
-A teljes szabályalapú RAG-teszt csak akkor felel meg, ha minden szükséges feltétel teljesül.
-
-### Fontos különbség
-
-A szabályalapú RAG-ellenőrzés és az LLM as Judge eltérő dolgot mér.
-
-Például:
-
-- a dokumentum-visszakeresés nem talál forrást, ezért a RAG-teszt nem felel meg;
-- az asszisztens helyesen jelzi, hogy nincs releváns forrás, és nem talál ki választ;
-- emiatt az LLM as Judge magas pontszámot adhat az asszisztens viselkedésére.
-
-Ez nem programhiba. A két értékelési réteg egymást kiegészítő információt ad.
-
-### Tesztkérdés megválasztása
-
-A RAG-teszt kérdésének kapcsolódnia kell a feltöltött dokumentum tartalmához.
-
-Példa:
+### Példa konfiguráció
 
 ```text
-Tesztkérdés:
-Milyen hozzávalók szükségesek a túrós palacsintához?
+Persona:
+Olyan felhasználó, aki egyszerű vacsorát keres, de fokozatosan mondja el az étkezési korlátozásait.
 
-Elvárt dokumentum:
-palacsinta
+Cél:
+Találjon megfelelő, egyszerű vacsorareceptet a receptadatbázisból.
 
-Minimális hasonlóság:
-0.30
+Rejtett feltételek:
+A recept legyen húsmentes és tejtermékmentes.
+
+Kezdő üzenet:
+Ajánlj egy egyszerű vacsorát!
+
+Maximális fordulók:
+3
 ```
 
-## 10. LLM as Judge
+### Működés
 
-Az LLM as Judge egy külön modellhívással értékeli az asszisztens válaszát.
+```text
+Kezdő user üzenet
+        ↓
+Asszisztensválasz
+        ↓
+User Simulator elolvassa a választ
+        ↓
+A szimulátor reagáló user üzenetet generál
+        ↓
+A teljes beszélgetési előzmény újra eljut az asszisztenshez
+```
 
-### Single-turn szempontok
+A User Simulator:
+
+- mindig az asszisztens legutóbbi válaszára reagál;
+- a rejtett feltételeket fokozatosan közli;
+- nem másolja be mesterségesen a teljes korábbi feltétellistát;
+- nem használ „Vedd figyelembe az összes korábbi feltételt” típusú segítséget;
+- felismerheti a megfelelő, biztonságos forráshiány-jelzést;
+- nem kényszeríti az asszisztenst forrás nélküli recept kitalálására;
+- a maximális fordulószámnál mindenképpen leáll.
+
+A mentett Multi-turn eredmény tartalmazza:
+
+- a personát, célt és rejtett feltételeket;
+- a kezdő üzenetet;
+- a teljes `messages` listát;
+- az olvasható beszélgetési fordulókat;
+- a User Simulator modelljét;
+- a leállás okát;
+- a teljes válaszidőt;
+- a végső Judge-értékelést.
+
+## 9. User Simulator API
+
+A végpont:
+
+```text
+POST /api/evaluation/simulate-user
+```
+
+A bemenet tartalmazza:
+
+- a personát;
+- a felhasználói célt;
+- a rejtett feltételeket;
+- a teljes beszélgetést;
+- az aktuális fordulószámot;
+- a maximális fordulószámot.
+
+A válasz például:
+
+```json
+{
+  "message": "Ez sajnos nem megfelelő, mert tejterméket sem fogyaszthatok.",
+  "shouldStop": false,
+  "reason": "Az ajánlott recept megsérti a rejtett feltételt."
+}
+```
+
+## 10. RAG-szintű evaluáció
+
+A RAG-teszt külön vizsgálja a dokumentum-visszakeresést és a végső válasz minőségét.
+
+Szabályalapú ellenőrzések:
+
+- történt-e keresési találat;
+- kapott-e RAG-kontextust a modell;
+- megtalálható-e az elvárt dokumentum;
+- eléri-e a legjobb találat a minimális hasonlósági küszöböt.
+
+A szabályalapú RAG-eredmény és az LLM as Judge eredménye eltérhet, mert más kérdésre válaszolnak:
+
+```text
+RAG-ellenőrzés:
+Megtalálta-e a rendszer a szükséges dokumentumot?
+
+LLM as Judge:
+Megfelelően viselkedett-e az asszisztens a rendelkezésére álló források alapján?
+```
+
+## 11. Forrásalapú LLM as Judge
+
+A Judge nemcsak a kérdést, a választ és az elvárt viselkedést kapja meg, hanem a ténylegesen visszakeresett receptchunkok szövegét is.
+
+Pontozott szempontok:
 
 - relevancia;
 - utasításkövetés;
-- megalapozottság;
-- érthetőség.
+- groundedness;
+- érthetőség;
+- Multi-turn esetén kontextusmegőrzés;
+- Multi-turn esetén következetesség.
 
-### Multi-turn további szempontok
+Minden részpontszám 1 és 5 közötti egész szám. Az összpontszám a hat részpontszám átlaga. A megfelelési küszöb:
 
-- kontextusmegőrzés;
-- következetesség.
+```text
+overallScore >= 3.5
+```
 
-Minden pontszám 1 és 5 közötti érték.
+### Groundedness
 
-Az összpontszámot a szerver újraszámolja a részpontszámok átlagából. A teszt akkor felel meg, ha az összpontszám legalább 3,5.
+A Judge külön ellenőrzi, hogy a válaszban szereplő következő adatok megtalálhatók-e a forrásokban:
 
-Az értékelő modell rövid magyar nyelvű indoklást is készít.
+- hozzávalók;
+- mennyiségek;
+- elkészítési idő;
+- adagszám;
+- étrendi tulajdonságok;
+- helyettesítési javaslatok.
 
-### Korlátok
+A forrással nem igazolható állítások külön listába kerülnek:
 
-Az LLM as Judge nem tekinthető abszolút igazságnak. Az eredmény függhet:
+```json
+{
+  "unsupportedClaims": [
+    "A recept 20 perc alatt elkészül.",
+    "A recept 4 adaghoz elegendő."
+  ]
+}
+```
 
-- az értékelő prompttól;
-- a használt modelltől;
-- a válasz megfogalmazásától;
-- az értékelő modell természetes változékonyságától.
+A Judge különbséget tesz az alábbi állítások között:
 
-Ezért a rendszer emberi értékelést is támogat.
+```text
+Óvatos, ellenőrizhető:
+A most visszakeresett források között nem találtam megfelelő receptet.
 
-## 11. Emberi értékelés
+Túl általános:
+A teljes adatbázisban nincs megfelelő recept.
+```
 
-Minden sikeresen lefuttatott és elmentett automatikus teszthez külön emberi értékelés készíthető.
+A relevancia, az érthetőség, a kontextusmegőrzés és a következetesség nem kap automatikusan alacsony pontot csak azért, mert nem sikerült megfelelő receptet találni. A korrekt, forráshű visszautasítás sikeres viselkedésnek számíthat.
 
-### Beállítható adatok
+## 12. Emberi értékelés
 
-- emberi pontszám 1 és 5 között;
+Minden mentett automatikus teszthez külön emberi értékelés készíthető.
+
+Megadható:
+
+- 1 és 5 közötti emberi pontszám;
 - megfelelt vagy nem felelt meg állapot;
-- egyetértés az LLM as Judge eredményével;
-- szöveges megjegyzés.
+- egyetértés az LLM Judge eredményével;
+- szöveges szakmai megjegyzés.
 
-Az emberi értékelés külön JSON-fájlba kerül. Az eredeti automatikus eredmény változatlan marad.
+Az emberi értékelés külön JSON-fájlba kerül, az automatikus eredmény nem módosul.
 
-A kapcsolatot az automatikus eredményfájl neve biztosítja.
+## 13. Eredménymentés
 
-## 12. Automatikus eredménymentés
-
-Minden sikeresen lefuttatott teszt külön JSON-fájlba kerül.
-
-Az eredmények mappája:
+Az eredmények helye:
 
 ```text
 data/evaluation-results/
@@ -353,227 +353,108 @@ data/evaluation-results/
 Példák:
 
 ```text
-single-turn_2026-10-01T10-20-30.123Z_a1b2c3.json
-ab-test_2026-10-01T10-25-30.123Z_d4e5f6.json
-multi-turn_2026-10-01T10-30-30.123Z_g7h8i9.json
-rag_2026-10-01T10-35-30.123Z_j1k2l3.json
-human-review_2026-10-01T10-40-30.123Z_m4n5o6.json
+single-turn_....json
+ab-test_....json
+multi-turn_....json
+rag_....json
+human-review_....json
 ```
 
-Minden futás egyedi időbélyeget és rövid azonosítót kap, ezért a korábbi eredmények nem íródnak felül.
-
-### Mentett adatok
-
-A teszttípustól függően az eredményfájl tartalmazhatja:
-
-- a tesztkérdést;
-- az elvárt viselkedést;
-- a rendszerpromptot;
-- az asszisztens választ;
-- a modellt;
-- a válaszidőt;
-- a RAG-eredményeket;
-- az LLM as Judge pontszámait;
-- a teljes multi-turn beszélgetést;
-- a szabályalapú RAG-ellenőrzést.
-
-## 13. Eredménylista API
-
-A mentett automatikus eredményeket a következő belső API-végpont listázza:
-
-```text
-GET /api/evaluation/results
-```
-
-Böngészőből ellenőrzéshez elérhető:
-
-```text
-http://localhost:3000/api/evaluation/results
-```
-
-A végpontot nem kell külön elindítani és normál használat közben nem szükséges közvetlenül megnyitni.
-
-A Baseline és iteráció összehasonlítása panel automatikusan meghívja az API-t.
+Minden fájl egyedi időbélyeget és rövid azonosítót kap.
 
 ## 14. Baseline és iteráció összehasonlítása
 
-A felület alsó részén két mentett automatikus eredmény választható ki:
+A felület két mentett automatikus eredményt hasonlít össze:
 
-- baseline eredmény;
+- baseline;
 - iteráció utáni eredmény.
 
-### Összehasonlított mutatók
+Összehasonlított mutatók:
 
 - összpontszám;
 - relevancia;
 - utasításkövetés;
-- megalapozottság;
+- groundedness;
 - érthetőség;
 - kontextusmegőrzés;
 - következetesség;
 - válaszidő;
-- megfelelt vagy nem felelt meg állapot.
+- megfelelési állapot.
 
-A felület jelzi, hogy a mérőszám:
-
-- javult;
-- romlott;
-- változatlan maradt.
-
-A válaszidőnél az alacsonyabb érték számít javulásnak. A minőségi pontszámoknál a magasabb érték számít javulásnak.
-
-### Helyes összehasonlítás
-
-Korrekt összehasonlításhoz a két futásnál egyezzen:
+Korrekt összehasonlításhoz egyezzen:
 
 - a teszttípus;
-- a tesztkérdés vagy multi-turn forgatókönyv;
+- a persona és a cél;
+- a rejtett feltételek;
+- a kezdő üzenet;
+- a maximális fordulószám;
 - az elvárt viselkedés;
-- lehetőleg a modell;
-- a Judge értékelési logikája.
+- a modell és a Judge logikája.
 
-Az egyetlen szándékos különbség a vizsgált fejlesztési változtatás legyen.
+Az adaptív szimuláció miatt a konkrét beszélgetési útvonal eltérhet. Ez nem hiba, hanem a teszt tárgya.
 
-Eltérő teszttípusok kiválasztásakor a felület figyelmeztetést jelenít meg.
+## 15. Végleges baseline mérés
 
-## 15. Baseline mérés és iteratív fejlesztés
+A javított módszerrel három adaptív Multi-turn baseline-futás készült azonos konfigurációval.
 
-A kiválasztott fejlesztési cél a multi-turn beszélgetésekben megadott felhasználói feltételek megőrzése volt.
+| Futás      | Fordulók | Összpontszám | Megfelelt | Nem alátámasztott állítás | Teljes válaszidő |
+| ---------- | -------: | -----------: | --------- | ------------------------: | ---------------: |
+| Baseline 1 |        3 |         5,00 | Igen      |                         0 |           9,67 s |
+| Baseline 2 |        3 |         5,00 | Igen      |                         0 |           9,87 s |
+| Baseline 3 |        3 |         5,00 | Igen      |                         0 |           8,84 s |
 
-### Baseline
-
-A fejlesztés előtt ugyanaz a háromfordulós teszt három alkalommal futott le a `conversational` rendszerprompttal.
-
-### Célzott módosítás
-
-A `conversational` rendszerprompt külön többfordulós szabályokkal egészült ki.
-
-A módosítás előírja:
-
-- a korábbi felhasználói feltételek összegyűjtését;
-- az új feltételek hozzáadását;
-- az étkezési korlátozások együttes alkalmazását;
-- az összes feltétel ellenőrzését a végső ajánlás előtt;
-- ellentmondó feltételeknél pontosító kérdés használatát.
-
-### Iteráció
-
-A promptmódosítás után ugyanaz a háromfordulós teszt további három alkalommal futott le.
-
-A baseline és az iteráció eredményei az összehasonlító panelen vizsgálhatók.
-
-## 16. API-végpontok
-
-### Receptasszisztens
+Összesítés:
 
 ```text
-POST /api/chat
+Megfelelési arány: 3/3, 100%
+Átlagos összpontszám: 5,00/5
+Átlagos teljes válaszidő: 9,46 s
+Nem alátámasztott állítások száma: 0
 ```
 
-Feladata a dokumentumkeresés, a RAG-válasz elkészítése és a forrásadatok visszaadása.
+Mindhárom futásban:
 
-### LLM as Judge
+- a User Simulator válaszfüggő üzeneteket generált;
+- az asszisztens megőrizte a húsmentes és tejtermékmentes feltételeket;
+- a források között nem talált egyértelműen megfelelő receptet;
+- az asszisztens nem talált ki alternatívát;
+- a Judge minden részszempontra 5 pontot adott;
+- az `unsupportedClaims` lista üres maradt.
 
-```text
-POST /api/evaluation/judge
-```
+A baseline alapján további promptmódosítás nem indokolt ehhez a tesztesethez, mert mindhárom futás maximális pontszámot ért el. További fejlesztéshez nehezebb, más viselkedést vizsgáló teszteset szükséges.
 
-Feladata az asszisztensválasz vagy a teljes beszélgetés automatikus pontozása.
+## 16. Ismert korlátok
 
-### Automatikus eredménymentés
+- A User Simulator maga is LLM-alapú, ezért a beszélgetési útvonal nem teljesen determinisztikus.
+- A maximális fordulószám elérésekor a futási ciklus lezárul. A harmadik válasz után nem készül külön negyedik user üzenet.
+- A Multi-turn Judge jelenleg elsősorban a végső asszisztensválaszhoz visszakeresett forrásokat kapja meg. A teljes beszélgetés minden asszisztensfordulójának külön forráskapcsolása további fejlesztés lehet.
+- A helyi JSON-fájlmentés fejlesztői környezethez készült.
+- Az összehasonlító panel egyszerre két futást hasonlít össze, három vagy több futás átlagát nem számolja automatikusan.
+- A válaszidőt az API és a hálózat pillanatnyi terhelése is befolyásolja.
+- A maximális, 5,00 pontos baseline plafonhatást okoz, ezért ugyanebben a tesztesetben további javulás nem mérhető.
 
-```text
-POST /api/evaluation/save
-```
+## 17. Továbbfejlesztési lehetőségek
 
-Feladata a teszteredmény külön JSON-fájlba mentése.
-
-### Emberi értékelés mentése
-
-```text
-POST /api/evaluation/human-review
-```
-
-Feladata az emberi értékelés külön JSON-fájlba mentése.
-
-### Eredménylista
-
-```text
-GET /api/evaluation/results
-```
-
-Feladata a mentett automatikus eredmények egységes listázása.
-
-## 17. Javasolt tesztelési sorrend
-
-1. Indítsd el a projektet.
-2. Nyisd meg az `/evaluation` oldalt.
-3. Futtass egy Single-turn tesztet.
-4. Futtass egy A/B tesztet.
-5. Futtass egy Multi-turn tesztet.
-6. Futtass egy konkrét dokumentumra irányuló RAG-tesztet.
-7. Ellenőrizd a mentett JSON-fájlokat.
-8. Készíts legalább egy emberi értékelést.
-9. Frissítsd az eredménylistát.
-10. Válassz azonos típusú baseline és iterációs eredményt.
-11. Értelmezd a pontszámok és a válaszidő változását.
+- fordulónkénti RAG-források mentése és Judge-nak történő átadása;
+- az utolsó asszisztensválasz után külön lezárási döntés kérése a User Simulatortól;
+- több különböző persona és regressziós tesztkészlet;
+- kötegelt tesztfuttatás;
+- átlag, minimum, maximum és szórás automatikus számítása;
+- eredmények adatbázisban történő tárolása;
+- CSV- vagy Excel-export;
+- grafikonok és trendek;
+- több emberi értékelő eredményeinek összevetése.
 
 ## 18. Technikai ellenőrzés
 
-Kódellenőrzés:
-
 ```powershell
 npm run lint
-```
-
-Production build ellenőrzése:
-
-```powershell
 npm run build
-```
-
-Fejlesztői szerver indítása:
-
-```powershell
 npm run dev
 ```
 
-## 19. Ismert korlátok
+## 19. Összegzés
 
-- A multi-turn előzményeket a rendszer rövidített szövegként adja tovább, nem strukturált üzenettömbként.
-- A chat API 2000 karakteres korlátja miatt a multi-turn üzenetek rövidítve vannak.
-- Az LLM as Judge pontozása nem teljesen determinisztikus.
-- A helyi fájlmentés fejlesztői környezethez készült.
-- Felhőbe telepített, szerver nélküli környezetben tartós adatbázis vagy külső tárhely szükséges.
-- A RAG-szintű ellenőrzés a forrás-metaadatokat és hasonlósági értékeket használja, nem a teljes dokumentumrészleteket.
-- Az A/B eredmény összehasonlító listája a két prompt eredményének átlagát használja.
-- Különböző teszttípusok eredményei nem hasonlíthatók össze közvetlenül.
+A jelenlegi Evaluációs Központ már nem merev, előre megírt Multi-turn scriptet futtat. A rendszer valódi strukturált beszélgetési előzményt továbbít, az adaptív User Simulator az asszisztens válaszaira reagál, a Judge pedig a tényleges RAG-források alapján értékeli a groundedness tulajdonságot.
 
-## 20. Továbbfejlesztési lehetőségek
-
-Lehetséges későbbi fejlesztések:
-
-- strukturált multi-turn `messages` tömb támogatása;
-- szerkeszthető számú beszélgetési forduló;
-- tesztkészletek tömeges futtatása;
-- eredmények adatbázisban tárolása;
-- grafikonok és statisztikai összesítések;
-- emberi és automatikus értékelés egyezési arányának számítása;
-- eredmények exportálása CSV- vagy Excel-formátumba;
-- külön baseline és iteráció címkék;
-- ismételt futások átlagának és szórásának automatikus számítása.
-
-## 21. Összegzés
-
-Az Evaluációs Központ a meglévő AI Receptasszisztenshez kapcsolódó, elkülönített tesztfelület.
-
-A rendszer egyszerre támogatja:
-
-- az automatikus tesztfuttatást;
-- az LLM-alapú minőségértékelést;
-- a determinisztikus RAG-ellenőrzést;
-- az emberi felülvizsgálatot;
-- a külön eredményfájlok létrehozását;
-- a baseline és iteráció utáni állapot összehasonlítását.
-
-A megoldás bemutatja, hogy egy AI-rendszer fejlesztése mérés, célzott módosítás és visszamérés segítségével végezhető el.
+A három végleges baseline-futás mindegyike megfelelt. Az asszisztens stabilan megőrizte a fokozatosan közölt étkezési korlátozásokat, és megfelelő forrás hiányában nem talált ki nem igazolt receptet vagy helyettesítést.

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import type { ChatMessageInput } from "@/lib/chat-types";
 import styles from "./EvaluationDashboard.module.css";
 import HumanReviewForm from "./HumanReviewForm";
 import {
@@ -23,6 +24,7 @@ interface Source {
   originalFilename: string;
   documentTitle: string | null;
   similarity: number;
+  content: string;
 }
 
 interface ChatSuccess {
@@ -54,6 +56,7 @@ interface JudgeResult {
   consistency: number;
   overallScore: number;
   passed: boolean;
+  unsupportedClaims: string[];
   explanation: string;
 }
 
@@ -82,8 +85,11 @@ interface ConversationTurn {
 
 interface MultiTurnResult {
   turns: ConversationTurn[];
+  messages: ChatMessageInput[];
   finalEvaluation: EvaluationResult;
   totalResponseTime: number;
+  simulatorModel: string;
+  stopReason: string;
 }
 
 interface RagEvaluationResult {
@@ -97,6 +103,16 @@ interface SaveResponse {
   success: boolean;
   fileName?: string;
   message?: string;
+}
+
+interface SimulatedUserSuccess {
+  success: true;
+  model: string;
+  result: {
+    message: string;
+    shouldStop: boolean;
+    reason: string;
+  };
 }
 
 export default function EvaluationDashboard() {
@@ -119,11 +135,24 @@ export default function EvaluationDashboard() {
   const [minimumSimilarity, setMinimumSimilarity] =
     useState(0.5);
 
-  const [multiTurnQuestions, setMultiTurnQuestions] = useState([
-    "Ajánlj egy egyszerű vacsorát!",
-    "Legyen húsmentes.",
-    "Tejterméket sem fogyaszthatok. Mit ajánlasz az eddigi feltételek alapján?",
-  ]);
+  const [simulatorPersona, setSimulatorPersona] = useState(
+    "Olyan felhasználó, aki egyszerű vacsorát keres, de fokozatosan mondja el az étkezési korlátozásait."
+  );
+
+  const [simulatorGoal, setSimulatorGoal] = useState(
+    "Találjon megfelelő, egyszerű vacsorareceptet."
+  );
+
+  const [simulatorHiddenConstraints, setSimulatorHiddenConstraints] =
+    useState(
+      "A recept legyen húsmentes és tejtermékmentes."
+    );
+
+  const [simulatorInitialMessage, setSimulatorInitialMessage] =
+    useState("Ajánlj egy egyszerű vacsorát!");
+
+  const [simulatorMaximumTurns, setSimulatorMaximumTurns] =
+    useState(3);
 
   const [singleResult, setSingleResult] =
     useState<EvaluationResult | null>(null);
@@ -153,9 +182,19 @@ const currentJudgePassed =
 
   // Meghívja a meglévő receptasszisztens API-t.
   async function requestChat(
-    message: string,
+    input: string | ChatMessageInput[],
     variant: PromptVariant
   ) {
+    const messages: ChatMessageInput[] =
+      typeof input === "string"
+        ? [
+            {
+              role: "user",
+              content: input,
+            },
+          ]
+        : input;
+
     const startTime = performance.now();
 
     const response = await fetch("/api/chat", {
@@ -164,7 +203,7 @@ const currentJudgePassed =
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        message,
+        messages,
         systemPromptVariant: variant,
       }),
     });
@@ -206,12 +245,14 @@ const currentJudgePassed =
     answer,
     conversation,
     expectedBehavior,
+    sources,
   }: {
     evaluationType: "single-turn" | "multi-turn";
     question?: string;
     answer: string;
     conversation?: string;
     expectedBehavior: string;
+    sources: Source[];
   }) {
     const response = await fetch(
       "/api/evaluation/judge",
@@ -226,6 +267,7 @@ const currentJudgePassed =
           answer,
           conversation,
           expectedBehavior,
+          sources,
         }),
       }
     );
@@ -281,6 +323,7 @@ const currentJudgePassed =
       question: normalizedQuestion,
       answer: chat.data.answer,
       expectedBehavior: normalizedExpectation,
+      sources: chat.data.sources,
     });
 
     return {
@@ -296,68 +339,100 @@ const currentJudgePassed =
     };
   }
 
-  // Elkészíti a következő Multi-turn forduló rövid üzenetét.
-  function createMultiTurnMessage(
-    turns: ConversationTurn[],
-    currentQuestion: string
-  ) {
-    if (turns.length === 0) {
-      return currentQuestion.slice(0, 1900);
+  // Az asszisztens válasza alapján elkészíti
+  // a szimulált felhasználó következő üzenetét.
+  async function requestSimulatedUser({
+    conversation,
+    turnNumber,
+    maximumTurns,
+  }: {
+    conversation: ChatMessageInput[];
+    turnNumber: number;
+    maximumTurns: number;
+  }) {
+    setStatus(
+      `A szimulált felhasználó reagál a ${turnNumber}. válaszra...`
+    );
+
+    const response = await fetch(
+      "/api/evaluation/simulate-user",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          persona: simulatorPersona.trim(),
+          goal: simulatorGoal.trim(),
+          hiddenConstraints:
+            simulatorHiddenConstraints.trim(),
+          conversation,
+          turnNumber,
+          maximumTurns,
+        }),
+      }
+    );
+
+    const contentType =
+      response.headers.get("content-type") || "";
+
+    if (!contentType.includes("application/json")) {
+      throw new Error(
+        "A user simulator API nem JSON-választ adott."
+      );
     }
 
-    const previousUserRequests = turns
-      .map((turn, index) => {
-        const shortenedRequest = turn.user.slice(0, 300);
+    const data = (await response.json()) as
+      | SimulatedUserSuccess
+      | ApiError;
 
-        return (
-          `${index + 1}. korábbi kérés: ` +
-          shortenedRequest
-        );
-      })
-      .join("\n");
+    if (!response.ok || !data.success) {
+      const message =
+        !data.success
+          ? data.message ||
+            data.error?.message ||
+            "A szimulált felhasználó futtatása sikertelen."
+          : "A szimulált felhasználó futtatása sikertelen.";
 
-    const shortenedCurrentQuestion =
-      currentQuestion.slice(0, 900);
+      throw new Error(message);
+    }
 
-    const message =
-      "Korábbi felhasználói feltételek:\n" +
-      previousUserRequests +
-      "\n\nAktuális kérés:\n" +
-      shortenedCurrentQuestion +
-      "\n\nVedd figyelembe az összes korábbi feltételt.";
-
-    return message.slice(0, 1900);
+    return data;
   }
 
-  // Lefuttatja a teljes Multi-turn beszélgetést.
+  // Lefuttatja az adaptív Multi-turn beszélgetést.
   async function runMultiTurnTest(
-    questions: string[],
-    expectation: string
+    initialMessage: string,
+    expectation: string,
+    maximumTurns: number
   ): Promise<MultiTurnResult> {
     const turns: ConversationTurn[] = [];
+    const messages: ChatMessageInput[] = [];
 
     let totalResponseTime = 0;
     let lastChat: ChatSuccess | null = null;
     let lastResponseTime = 0;
+    let currentUserMessage = initialMessage;
+    let simulatorModel = "";
+    let stopReason =
+      "A szimuláció elérte a maximális fordulószámot.";
 
     for (
-      let turnIndex = 0;
-      turnIndex < questions.length;
-      turnIndex += 1
+      let turnNumber = 1;
+      turnNumber <= maximumTurns;
+      turnNumber += 1
     ) {
-      const currentQuestion = questions[turnIndex];
-
       setStatus(
-        `Multi-turn teszt: ${turnIndex + 1}. forduló fut...`
+        `Adaptív Multi-turn teszt: ${turnNumber}. asszisztensforduló fut...`
       );
 
-      const multiTurnMessage = createMultiTurnMessage(
-        turns,
-        currentQuestion
-      );
+      messages.push({
+        role: "user",
+        content: currentUserMessage,
+      });
 
       const chat = await requestChat(
-        multiTurnMessage,
+        messages,
         promptVariant
       );
 
@@ -365,10 +440,44 @@ const currentJudgePassed =
       lastResponseTime = chat.responseTime;
       totalResponseTime += chat.responseTime;
 
+      messages.push({
+        role: "assistant",
+        content: chat.data.answer,
+      });
+
       turns.push({
-        user: currentQuestion,
+        user: currentUserMessage,
         assistant: chat.data.answer,
       });
+
+      if (turnNumber >= maximumTurns) {
+        stopReason =
+          "A szimuláció elérte a maximális fordulószámot.";
+        break;
+      }
+
+      const simulatedUser =
+        await requestSimulatedUser({
+          conversation: messages,
+          turnNumber,
+          maximumTurns,
+        });
+
+      simulatorModel = simulatedUser.model;
+      stopReason = simulatedUser.result.reason;
+
+      if (simulatedUser.result.shouldStop) {
+        break;
+      }
+
+      currentUserMessage =
+        simulatedUser.result.message.trim();
+
+      if (!currentUserMessage) {
+        throw new Error(
+          "A szimulált felhasználó üres üzenetet adott."
+        );
+      }
     }
 
     if (!lastChat || turns.length === 0) {
@@ -381,13 +490,15 @@ const currentJudgePassed =
       "Az LLM Judge értékeli a teljes beszélgetést..."
     );
 
-    const conversationText = turns
-      .map(
-        (turn, index) =>
-          `${index + 1}. forduló\n` +
-          `Felhasználó: ${turn.user}\n` +
-          `Asszisztens: ${turn.assistant}`
-      )
+    const conversationText = messages
+      .map((message, index) => {
+        const speaker =
+          message.role === "user"
+            ? "Felhasználó"
+            : "Asszisztens";
+
+        return `${index + 1}. ${speaker}: ${message.content}`;
+      })
       .join("\n\n");
 
     const finalAnswer =
@@ -398,6 +509,7 @@ const currentJudgePassed =
       answer: finalAnswer,
       conversation: conversationText,
       expectedBehavior: expectation,
+      sources: lastChat.sources,
     });
 
     const finalEvaluation: EvaluationResult = {
@@ -414,8 +526,11 @@ const currentJudgePassed =
 
     return {
       turns,
+      messages,
       finalEvaluation,
       totalResponseTime,
+      simulatorModel,
+      stopReason,
     };
   }
 
@@ -542,19 +657,37 @@ const currentJudgePassed =
       }
 
       if (evaluationType === "multi-turn") {
-        const questions = multiTurnQuestions
-          .map((item) => item.trim())
-          .filter(Boolean);
+        const initialMessage =
+          simulatorInitialMessage.trim();
 
-        if (questions.length < 2) {
+        if (!simulatorPersona.trim()) {
           throw new Error(
-            "Legalább két beszélgetési fordulót adj meg."
+            "A szimulált felhasználó personája nem lehet üres."
+          );
+        }
+
+        if (!simulatorGoal.trim()) {
+          throw new Error(
+            "A szimulált felhasználó célja nem lehet üres."
+          );
+        }
+
+        if (!simulatorHiddenConstraints.trim()) {
+          throw new Error(
+            "A rejtett feltételek mező nem lehet üres."
+          );
+        }
+
+        if (!initialMessage) {
+          throw new Error(
+            "A kezdő felhasználói üzenet nem lehet üres."
           );
         }
 
         const result = await runMultiTurnTest(
-          questions,
-          normalizedExpectation
+          initialMessage,
+          normalizedExpectation,
+          simulatorMaximumTurns
         );
 
         setMultiTurnResult(result);
@@ -563,8 +696,18 @@ const currentJudgePassed =
           evaluationType: "multi-turn",
           promptVariant,
           expectedBehavior: normalizedExpectation,
-          questions,
+          simulator: {
+            persona: simulatorPersona.trim(),
+            goal: simulatorGoal.trim(),
+            hiddenConstraints:
+              simulatorHiddenConstraints.trim(),
+            initialMessage,
+            maximumTurns: simulatorMaximumTurns,
+            model: result.simulatorModel,
+            stopReason: result.stopReason,
+          },
           turns: result.turns,
+          messages: result.messages,
           totalResponseTime: result.totalResponseTime,
           finalEvaluation: result.finalEvaluation,
         });
@@ -649,18 +792,6 @@ const currentJudgePassed =
     } finally {
       setIsRunning(false);
     }
-  }
-
-  // Módosítja valamelyik Multi-turn kérdést.
-  function updateMultiTurnQuestion(
-    index: number,
-    value: string
-  ) {
-    setMultiTurnQuestions((current) =>
-      current.map((item, itemIndex) =>
-        itemIndex === index ? value : item
-      )
-    );
   }
 
   return (
@@ -765,40 +896,93 @@ const currentJudgePassed =
         {evaluationType === "multi-turn" && (
           <div>
             <div className={styles.answer}>
-              <strong>Multi-turn beszélgetés</strong>
+              <strong>Adaptív Multi-turn szimuláció</strong>
 
               <p>
-                A fordulók egymásra épülnek, és a
-                korábbi felhasználói feltételek
-                továbbadásra kerülnek.
+                Az első üzenet után a szimulált felhasználó
+                mindig az asszisztens legutóbbi válaszára
+                reagál. A rejtett feltételeket fokozatosan közli.
               </p>
             </div>
 
-            {multiTurnQuestions.map(
-              (turnQuestion, index) => (
-                <label
-                  className={styles.field}
-                  key={index}
-                >
-                  <span>
-                    {index + 1}. felhasználói forduló
-                  </span>
+            <label className={styles.field}>
+              <span>Felhasználói persona</span>
 
-                  <textarea
-                    value={turnQuestion}
-                    onChange={(event) =>
-                      updateMultiTurnQuestion(
-                        index,
-                        event.target.value
-                      )
-                    }
-                    rows={3}
-                    maxLength={900}
-                    disabled={isRunning}
-                  />
-                </label>
-              )
-            )}
+              <textarea
+                value={simulatorPersona}
+                onChange={(event) =>
+                  setSimulatorPersona(event.target.value)
+                }
+                rows={3}
+                maxLength={2000}
+                disabled={isRunning}
+              />
+            </label>
+
+            <label className={styles.field}>
+              <span>Felhasználó célja</span>
+
+              <textarea
+                value={simulatorGoal}
+                onChange={(event) =>
+                  setSimulatorGoal(event.target.value)
+                }
+                rows={2}
+                maxLength={2000}
+                disabled={isRunning}
+              />
+            </label>
+
+            <label className={styles.field}>
+              <span>Rejtett feltételek</span>
+
+              <textarea
+                value={simulatorHiddenConstraints}
+                onChange={(event) =>
+                  setSimulatorHiddenConstraints(
+                    event.target.value
+                  )
+                }
+                rows={2}
+                maxLength={2000}
+                disabled={isRunning}
+              />
+            </label>
+
+            <label className={styles.field}>
+              <span>Kezdő felhasználói üzenet</span>
+
+              <textarea
+                value={simulatorInitialMessage}
+                onChange={(event) =>
+                  setSimulatorInitialMessage(
+                    event.target.value
+                  )
+                }
+                rows={2}
+                maxLength={2000}
+                disabled={isRunning}
+              />
+            </label>
+
+            <label className={styles.field}>
+              <span>Maximális fordulók száma</span>
+
+              <select
+                value={simulatorMaximumTurns}
+                onChange={(event) =>
+                  setSimulatorMaximumTurns(
+                    Number(event.target.value)
+                  )
+                }
+                disabled={isRunning}
+              >
+                <option value={2}>2 forduló</option>
+                <option value={3}>3 forduló</option>
+                <option value={4}>4 forduló</option>
+                <option value={5}>5 forduló</option>
+              </select>
+            </label>
           </div>
         )}
 
@@ -980,6 +1164,16 @@ const currentJudgePassed =
                   `${multiTurnResult.finalEvaluation.judge.consistency}/5`
                 }
               />
+            </div>
+
+            <div className={styles.answer}>
+              <h3>Szimuláció befejezése</h3>
+              <p>{multiTurnResult.stopReason}</p>
+              <p>
+                <strong>User simulator modell:</strong>{" "}
+                {multiTurnResult.simulatorModel ||
+                  "Nem volt további szimulált forduló"}
+              </p>
             </div>
 
             {multiTurnResult.turns.map(
@@ -1212,6 +1406,27 @@ function ResultPanel({
           {result.judge.passed
             ? "Megfelelt"
             : "Nem felelt meg"}
+        </div>
+
+        <div className={styles.answer}>
+          <h3>Nem alátámasztott állítások</h3>
+
+          {result.judge.unsupportedClaims.length === 0 ? (
+            <p>
+              A Judge nem talált a forrásokkal nem
+              alátámasztott tényszerű állítást.
+            </p>
+          ) : (
+            <ul className={styles.sourceList}>
+              {result.judge.unsupportedClaims.map(
+                (claim, index) => (
+                  <li key={`${index}-${claim}`}>
+                    {claim}
+                  </li>
+                )
+              )}
+            </ul>
+          )}
         </div>
 
         <div className={styles.answer}>

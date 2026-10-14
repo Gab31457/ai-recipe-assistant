@@ -293,6 +293,9 @@ export async function POST(request: Request) {
           result.originalFilename,
         documentTitle: result.documentTitle,
         similarity: result.similarity,
+
+        //A judge számára szükséges tényleges forrásszöveg
+        content: result.content,
       })
     );
 
